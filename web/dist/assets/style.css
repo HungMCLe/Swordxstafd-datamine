@@ -297,3 +297,21 @@ footer.site b{color:var(--ink)}
 .panel-head h2{margin:0;font-size:1.5rem}
 .panel-sub{margin:3px 0 0;font-size:12.8px;color:var(--faint);max-width:none}
 @media (max-width:700px){ .tree{padding:14px 12px} }
+
+
+/* ---------- skill description rich text ---------- */
+.sk-desc{line-height:1.55}
+.sk-desc .kw{color:var(--gold);font-weight:500;border-bottom:1px dotted currentColor;cursor:help}
+.sk-desc u{text-decoration:none}
+.sk-desc .dnum{font-family:var(--mono);font-size:.94em;font-weight:600;color:var(--ink)}
+.sk-desc span[style*="color"]{font-weight:500}
+
+/* stat values take the colour of the quality currently shown */
+.sk-stats.q-rare dd{color:var(--q-rare)}
+.sk-stats.q-epic dd{color:var(--q-epic)}
+.sk-stats.q-legendary dd{color:var(--q-legendary)}
+.sk-stats.q-mythic dd{color:var(--q-mythic)}
+.sk-stats.q-divine dd{color:var(--q-divine)}
+.sk-stats.q-immortal dd{color:var(--q-immortal)}
+.sk-stats dd{transition:color .12s ease}
+@media (prefers-reduced-motion:reduce){ .sk-stats dd{transition:none} }

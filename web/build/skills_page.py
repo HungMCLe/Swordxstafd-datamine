@@ -1,6 +1,7 @@
 """Skills page: a class tree you pick from, plus the selected class's skills."""
 from __future__ import annotations
 import html, json, os, re
+from richtext import richtext
 
 
 def _lines(data):
@@ -68,10 +69,7 @@ def render(layout, data, iconset):
                         if f"skill_{sid}.png" in iconset else '<span class="sk-noicon"></span>')
                 qs = s.get("qualities") or {}
                 have = [q for q in qualities if q in qs]
-                desc = re.sub(r"<[^>]+>", "", (s.get("desc") or "")).strip()
-                desc = re.sub(r"\s+", " ", desc)
-                if len(desc) > 190:
-                    desc = desc[:187].rstrip() + "…"
+                desc = richtext((s.get("desc") or "").strip())
                 kind = s.get("kind", "active")
                 pill = f'<span class="sk-kind {kind}">{kind}</span>'
                 if have:
@@ -105,7 +103,7 @@ def render(layout, data, iconset):
                     f'<article class="skill"{attr}>'
                     f'<div class="sk-head">{icon}<div class="sk-id"><h4>{html.escape(s["name"])}</h4>'
                     f'<span class="sk-meta">{pill}<span class="sk-num">#{sid}</span></span></div>{stepper}</div>'
-                    + (f'<p class="sk-desc">{html.escape(desc)}</p>' if desc else '')
+                    + (f'<p class="sk-desc">{desc}</p>' if desc else '')
                     + stats + '</article>')
             withn = sum(1 for s in c["skills"] if s.get("qualities"))
             panels.append(
@@ -122,7 +120,8 @@ def render(layout, data, iconset):
 <p class="eyebrow">Skills</p>
 <h1>Every skill, at every quality</h1>
 <p class="lede">Two base classes branch into four lines, each promoting through seven tiers.
-Pick a class, then step any skill from Rare to Immortal to see exactly how its numbers move.</p>
+Pick a class, then step any skill from Rare to Immortal — the values move, and take the colour of the
+quality you are on.</p>
 
 {tree}
 
@@ -141,6 +140,11 @@ Pick a class, then step any skill from Rare to Immortal to see exactly how its n
 <code>ViewPropEntities</code>, scaled by <code>level_prop_status</code>. Quality is a band of ranks, so each
 step shows the value at the <i>first</i> rank of that quality. Coefficients are a percentage of ATK;
 flat values are raw.</p>
+<p><b>Descriptions are the game's own.</b> All 328 are shown exactly as the client renders them, keeping
+its colour markup — element names in their element colour, and game keywords like <span class="kw">grid</span>
+or <span class="kw">base chance</span> highlighted. Fixed figures written into the text (chances, ranges,
+hit counts) are picked out in bold; those do not change with quality. The values that <i>do</i> change are the
+ones in the stat list, which take the colour of the quality you have selected.</p>
 <p><b>241 of 328 skills</b> have per-quality values. The rest are flat-stat passives, which the rank tables
 do not scale at all — they grow with character level instead. Those say so on the card.</p>
 </div>
