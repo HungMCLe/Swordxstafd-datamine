@@ -162,6 +162,50 @@ for r in table("prop_cfg"):
     if pt:
         prop_float[pt] = (r.get("Float") or "").strip().upper() == "TRUE"
 
+def plain(t):
+    """Game rich text -> plain text, for tooltips."""
+    import re as _r
+    t = _r.sub(r"<[^>]+>", "", t or "")
+    t = t.replace("\n", " ")
+    return _r.sub(r"\s+", " ", t).strip()
+
+
+def link_targets(row):
+    """Resolve <link=N> to {name, desc} using HyperLinkTypes/HyperLinkDatas."""
+    import re as _r, ast as _a
+    def arr(v):
+        v = (v or "").strip()
+        if not v or v == "[]":
+            return []
+        try:
+            out = _a.literal_eval(v)
+            return list(out) if isinstance(out, (list, tuple)) else []
+        except Exception:
+            return _r.findall(r"'([^']*)'", v)
+    types = arr(row.get("HyperLinkTypes"))
+    datas = arr(row.get("HyperLinkDatas"))
+    out = []
+    for i, ty in enumerate(types):
+        item = None
+        tyy = str(ty).strip()
+        if tyy == "Monster" and i < len(datas):
+            m = _r.search(r"MonsterId\s*:\s*(\d+)", str(datas[i]))
+            if m:
+                nm = L(f"monster_{m.group(1)}")
+                if nm:
+                    item = {"name": nm, "desc": "A unit summoned by this skill."}
+        elif tyy == "Entry" and i < len(datas):
+            m = _r.search(r"EntryId\s*:\s*(\d+)", str(datas[i]))
+            if m:
+                eid = m.group(1)
+                nm = L(f"entry_{eid}_name")
+                ds = L(f"entry_{eid}_desc")
+                if nm:
+                    item = {"name": nm, "desc": plain(ds)}
+        out.append(item)
+    return out
+
+
 def nice(k):
     lab = L(f"PropType.{k}")
     if not lab:
@@ -171,6 +215,15 @@ def nice(k):
               .replace("StatusFixedAdd", "Flat status effect ")
               .replace("Status Add", "Status effect "))
     return lab.strip()
+
+# ---------------- item type: the game has exactly two, Technique and Charm ----
+item_type = {}
+for r in table("item"):
+    try:
+        item_type[int(r["ClassId"])] = (r.get("ItemType") or "").strip()
+    except Exception:
+        pass
+TYPE_EN = {"ActiveSkill": "Technique", "PassiveSkill": "Charm"}
 
 # ---------------- skills ----------------
 skills = {}
@@ -222,7 +275,9 @@ def skill_entry(cid):
         "id": cid, "name": name, "desc": desc, "cn": s.get("Name", "").strip(),
         "tag": (s.get("OuterTag") or "").strip(),
         "sort": (s.get("SkillSortTypes") or "").strip(),
-        "maxRank": maxrank, "entity": eid, "kind": "active", "qualities": {},
+        "maxRank": maxrank, "entity": eid, "kind": "active",
+        "type": TYPE_EN.get(item_type.get(cid, ""), ""), "qualities": {},
+        "links": link_targets(s),
     }
     # buff/debuff skills: numbers live on the status entities the skill points at
     view = [v for v in ints(s.get("ViewPropEntities")) if v in status_ent]
