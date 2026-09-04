@@ -68,7 +68,7 @@ def render(layout, base_tables, dist: Path, out: Path):
         json.dumps(duel, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
     cfg = json.dumps({"ranks": ranks, "minCrit": 1.3, "minBlock": 1.5,
-                      "speedScale": spd_scale}, ensure_ascii=False).replace("</", "<\\/")
+                      "speedScale": spd_scale, "v": _b.asset_v()}, ensure_ascii=False).replace("</", "<\\/")
     dflt = next((i for i, r in enumerate(ranks) if r["name"] == "Champion III"), len(ranks) // 2)
     ropts = "".join(f'<option value="{i}"{" selected" if i == dflt else ""}>'
                     f'{html.escape(r["name"])}</option>' for i, r in enumerate(ranks))
@@ -171,7 +171,7 @@ what it is good for &mdash; not a prediction of a real match.</p>
 </div>
 </div>
 <script type="application/json" id="dueldata">{cfg}</script>
-<script src="../assets/duel.js" defer></script>
+<script src="../assets/duel.js?v={_b.asset_v()}" defer></script>
 """
     return layout("Duel simulator",
                   "Load two builds with eight Techniques each and simulate a thousand 1v1 fights using "

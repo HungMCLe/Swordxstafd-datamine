@@ -152,7 +152,7 @@ which multiply everything equally and so cannot change the ranking.</p>
 </div>
 </div>
 <script type="application/json" id="calcdata">{cfg}</script>
-<script src="../assets/calc.js" defer></script>
+<script src="../assets/calc.js?v={_b.asset_v()}" defer></script>
 """
     return layout("Where your next point goes",
                   "Evaluate the full Sword x Staff damage formula for your own stats, and see which "

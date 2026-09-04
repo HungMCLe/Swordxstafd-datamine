@@ -434,3 +434,5 @@ table.log{font-size:13px} table.log td{padding:6px 12px}
 .slot.charm{border-radius:50%}
 .slot.charm img{border-radius:50%}
 .slot.charm.filled{border-color:var(--blue-rail)}
+.pick.equipped{background:var(--raised)}
+.pick.equipped .pn{color:var(--muted)}

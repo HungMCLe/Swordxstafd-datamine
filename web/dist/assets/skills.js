@@ -139,7 +139,7 @@
   }
 
   /* the growth curves are big and shared, so they live in their own file */
-  fetch("../assets/curves.json")
+  fetch("../assets/curves.json?v=" + (G.v || ""))
     .then(function (r) { return r.json(); })
     .then(function (j) { CURVES = j; redrawAll(); })
     .catch(function () { /* coefficients still render without them */ });
