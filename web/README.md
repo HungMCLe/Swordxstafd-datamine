@@ -16,7 +16,8 @@ web/
       style.css
       icons/      113 item icons extracted from the game
       skills/     328 skill icons
-      skills.js   client-side rank stepper + character-level control
+      skills.js   client-side rank stepper + skill-level / character-rank controls
+      curves.json growth curves, fetched (too big to inline)
     index.html  method.html  top-up-ladder.html  combat/*.html
 ```
 
@@ -40,8 +41,12 @@ That regenerates every page into `web/dist/`. Commit the result; Vercel deploys 
 | Combat pages | `out/decompiled/Console/Common/BattleFormulaHandler.cs` |
 | Elemental / crit tables | `out/config_decrypted/level_prop_battle_extra` + `player_subrank` + `role_prop_group` |
 | Top-up ladder | `out/config_decrypted/accumulated_pay_award` |
-| Skills | `profession_base` (tier/class) + `skill` + `skill_rank` (34 ranks -> quality +N) + `entity_prop_skill` / `entity_prop_status` (factors) + `entity_prop_group_level` -> `level_prop_skill_*` (rank scale and level growth curve) |
+| Skills | `profession_base` + `skill` + `skill_rank` (34 ranks -> quality +N) + `entity_prop_skill` / `entity_prop_status` / `PassivePropFactors` (factors) + `entity_prop_group_level` -> the growth curves listed in **`level_prop_files`** |
 | Every name | `out/localization/text_en_US.bytes`, looked up by `XXHash64(key, seed=0)` |
+
+`level_prop_files` is the game's own manifest of which `level_prop_*` CSVs are baked into
+`Assets/Config/Binary/level_prop.bytes`. Only those are merged — reading the others produces
+wrong numbers.
 
 Names are never hand-translated — see `build.py:L()`. Keys follow the game's own patterns
 (`item_{id}_name`, `accumulated_pay_desc_{tier}`).

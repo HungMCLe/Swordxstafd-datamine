@@ -104,14 +104,20 @@ def render(layout, data, iconset):
                 + f' · {len(c["skills"])} skills, {withn} with per-rank values</p></div></div>'
                 f'<div class="skillgrid">{"".join(cards)}</div></section>')
 
-    levelopts = "".join(
-        f'<option value="{lv}"{" selected" if lv == data["defaultLevel"] else ""}>'
-        f'{lv} &middot; {html.escape(data["subranks"].get(str(lv), ""))}</option>'
-        for lv in data["levels"])
+    maxlv = data["levels"][-1]
+    from build import DIST
+    (DIST / "assets").mkdir(parents=True, exist_ok=True)
+    (DIST / "assets" / "curves.json").write_text(
+        json.dumps(data["curves"], separators=(",", ":")), encoding="utf-8")
     globaljson = json.dumps({k: data[k] for k in
                              ("rankLabels", "rankQuality", "qualityRanks",
-                              "levels", "curves", "defaultLevel")},
-                            ensure_ascii=False).replace("</", "<\\/")
+                              "lpidOf", "defaultLevel", "defaultSubrank")},
+                            ensure_ascii=False).replace("</", "<\/")
+    subopts = "".join(
+        f'<option value="{html.escape(sr["id"])}"'
+        f'{" selected" if sr["id"] == data["defaultSubrank"] else ""}>'
+        f'{html.escape(sr["name"])} &middot; to level {sr["cap"]}</option>'
+        for sr in data["subranks"])
 
     body = f"""
 <div class="wrap">
@@ -131,14 +137,16 @@ Pick a class, then step any skill one rank at a time and watch the numbers move.
     </div>
   </div>
   <div class="ctl">
-    <span class="ctl-label">Character level</span>
-    <div class="lvlrow">
-      <select id="lvl" aria-label="Character level">
-        {levelopts}
-      </select>
-      <span class="ctl-note">Flat values ride a growth curve picked by your rank; coefficients do not.</span>
-    </div>
+    <span class="ctl-label">Skill level</span>
+    <input type="number" id="lvl" min="1" max="{maxlv}" value="{data['defaultLevel']}"
+           inputmode="numeric" aria-label="Skill level">
   </div>
+  <div class="ctl">
+    <span class="ctl-label">Character rank</span>
+    <select id="subrank" aria-label="Character rank">{subopts}</select>
+  </div>
+  <p class="ctl-note">A skill's own level indexes a growth curve; your character rank picks which
+  curve. Flat figures move with both &mdash; coefficients move with rank alone.</p>
 </div>
 
 <script type="application/json" id="skilldata">{globaljson}</script>
@@ -150,16 +158,21 @@ Pick a class, then step any skill one rank at a time and watch the numbers move.
 qualities, and its <code>RankAddition</code> column is the number the game prints after the quality name.
 Rare spans 2 ranks, Epic 3, Legendary 4, Mythic 6, Divine 8 and Immortal 11 — so Divine&nbsp;+7 is a real
 step above Divine&nbsp;+0, not a relabelling.</p>
-<p><b>Where the numbers come from.</b> Straight out of the game's own
-<code>BattleFormulaHandler.CalcSkillProps</code>: a base read from the growth curve for your rank at your
-level, scaled per-property by the rank table, then by the skill's own factors, and for Charms once more by
-a rank factor. Coefficients — the percentages of ATK — sit outside that curve, so they move with rank only.
-Flat figures (damage, healing, shields, and the stats a Charm grants) move with <i>both</i>, which is why
-the character-level control above changes them and leaves the percentages alone.</p>
+<p><b>Where the numbers come from.</b> The game's own
+<code>BattleFormulaHandler.CalcSkillProps</code>. It reads a base from the growth curve that
+<code>entity_prop_group_level</code> picks for your character rank, indexed by the <i>skill's</i> own level;
+scales it per-property by the rank table; then by the skill's own factors; and for Charms once more by a
+rank factor. The columns in <code>entity_prop_skill</code> are factors on that curve, not amounts.</p>
+<p><b>Which tables count.</b> <code>LevelPropParser</code> reads one baked binary, and
+<code>level_prop_files</code> is the game's own list of what goes into it. That matters: <code>ElementMaster</code>
+for class 2001 lives in <code>level_prop_skill_passive_other</code>, which is <i>not</i> on the list — so the rank
+step has no multiplier for it and flat stats pass through unscaled. Checked against a live client: Rapid Cast
+at Immortal&nbsp;+1, skill level 127, character rank Expert&nbsp;III computes to <b>25,444</b>, and the game
+shows 25.4K.</p>
 <p><b>Two kinds, as the game splits them:</b> 166 <b>Techniques</b> and 162 <b>Charms</b>.
 Descriptions are the client's own text, colour markup intact, and every highlighted keyword carries the
 game's explanation on hover — all 393 resolve, including the units named by summon skills.</p>
-<p><b>272 of 328 skills</b> have per-rank values. For the rest the config's scaling chain produces nothing
+<p><b>276 of 328 skills</b> have per-rank values. For the rest the config's scaling chain produces nothing
 at all — their effect is described in words rather than a scaled number — and those cards say so.</p>
 </div>
 </div>
