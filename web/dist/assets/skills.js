@@ -11,7 +11,9 @@
     Mythic: "q-mythic", Divine: "q-divine", Immortal: "q-immortal"
   };
 
-  var level = G.defaultLevel;
+  var level = String(G.defaultLevel);
+  var subrank = G.defaultSubrank;
+  var CURVES = null;            /* filled by the fetch below */
 
   function fmt(v, isPct) {
     if (isPct) return (Math.round(v * 10) / 10).toFixed(1).replace(/\.0$/, "") + "%";
@@ -40,7 +42,9 @@
       if (direct && direct[prop] !== undefined) return direct[prop];
       var mult = d.lmult[rank];
       if (!mult || mult[prop] === undefined) return undefined;
-      var curve = G.curves[d.lgroup[prop]];
+      if (!CURVES) return undefined;
+      var lpid = (G.lpidOf[d.lgroup[prop]] || {})[subrank];
+      var curve = CURVES[lpid];
       if (!curve) return undefined;
       var row = curve[level];
       if (!row || row[prop] === undefined) return undefined;
@@ -110,13 +114,26 @@
     });
   });
 
-  var sel = document.getElementById("lvl");
-  if (sel) {
-    sel.addEventListener("change", function () {
-      level = sel.value;
-      cards.forEach(function (c) { c.redraw(); });
+  function redrawAll() { cards.forEach(function (c) { c.redraw(); }); }
+
+  var lvlEl = document.getElementById("lvl");
+  if (lvlEl) {
+    lvlEl.addEventListener("input", function () {
+      var n = parseInt(lvlEl.value, 10);
+      if (!n || n < 1) return;
+      level = String(n); redrawAll();
     });
   }
+  var srEl = document.getElementById("subrank");
+  if (srEl) {
+    srEl.addEventListener("change", function () { subrank = srEl.value; redrawAll(); });
+  }
+
+  /* the growth curves are big and shared, so they live in their own file */
+  fetch("../assets/curves.json")
+    .then(function (r) { return r.json(); })
+    .then(function (j) { CURVES = j; redrawAll(); })
+    .catch(function () { /* coefficients still render without them */ });
 
   /* ---------- keyword tooltips: hover on a pointer, tap on a touchscreen ---- */
   document.addEventListener("click", function (ev) {

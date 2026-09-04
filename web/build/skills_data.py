@@ -98,10 +98,14 @@ for r in table("skill_rank"):
 #     d    = ScaleSrcProps(d, levelProp[rankFactorId][rank])  when set (passives)
 # LevelPropParser is a single lookup across every level_prop_* table, keyed by
 # class_id, so the tables below are merged into one (class_id, level) map.
-LEVEL_TABLES = ["level_prop_skill", "level_prop_skill_passive",
-                "level_prop_skill_passive_main", "level_prop_skill_passive_other",
-                "level_prop_skill_scale", "level_prop_status",
-                "level_prop_skill_fixed_prop", "level_prop_skill_all_fixed_prop"]
+# level_prop_files is the game's own manifest of which CSVs are baked into
+# Assets/Config/Binary/level_prop.bytes — the single table LevelPropParser reads.
+# Merging anything else is wrong: level_prop_skill_passive_other holds
+# ElementMaster for class 2001 but is NOT in the binary, so GetProps(2001, rank)
+# has no ElementMaster and flat stats pass through the rank step unscaled.
+LEVEL_TABLES = [ln.strip()[:-4] for ln in
+                (CFG / "level_prop_files").read_text(encoding="utf-8-sig").splitlines()
+                if ln.strip().endswith(".csv") and ln.strip().startswith("level_prop")]
 levelprop = {}
 for _t in LEVEL_TABLES:
     for r in table(_t):
@@ -169,20 +173,27 @@ for r in table("entity_prop_group_level"):
     except Exception:
         pass
 
-# the levels the site's character-level control offers: the game's own subrank caps
-LEVELS = [cap for _, cap in subrank_cap]
+# Two independent inputs, as CalcSkillPassiveProps takes them: the skill item's
+# own level indexes the curve, the character's subrank picks which curve.
+# a skill's level only ever indexes a growth curve that some group points at
+_skill_lpids = set(group_level.values())
+MAXSKILLLEVEL = max((l for (c, l) in levelprop if c in _skill_lpids), default=200)
+LEVELS = list(range(1, MAXSKILLLEVEL + 1))
 
-def curve(group_id, level):
-    """levelProp[ entity_prop_group_level[group][subrank(level)] ][level]."""
-    lp = group_level.get((group_id, subrank_for(level)))
-    if not lp:
-        return {}
-    row = levelprop.get((lp, level))
+
+def group_lpids(group_id):
+    """The distinct growth curves a group uses, one per character rank band."""
+    return sorted({v for (g, _), v in group_level.items() if g == group_id})
+
+
+def curve_at(lpid, level):
+    """LevelPropParser.GetConfigProps: exact row, else the top of the range."""
+    row = levelprop.get((lpid, level))
     if row is None:
-        # some curves are deliberately short — group 14 is flagged
-        # "fixed value, does not change" and defines level 1 only.
-        below = [l for l in _lp_levels.get(lp, []) if l <= level]
-        row = levelprop.get((lp, below[-1])) if below else None
+        avail = _lp_levels.get(lpid, [])
+        if not avail:
+            return {}
+        row = levelprop.get((lpid, avail[-1] if level > avail[-1] else avail[0]))
     return row or {}
 
 
@@ -345,10 +356,11 @@ def _acc(entry, prop, label, pct, level_dep, group, per_rank):
 
 
 def _curve_props(group):
-    """Every prop the level curve for this group ever defines."""
+    """Every prop any of this group's curves ever defines."""
     keys = set()
-    for lv in LEVELS:
-        keys |= set(curve(group, lv))
+    for lpid in group_lpids(group):
+        for lv in LEVELS:
+            keys |= set(curve_at(lpid, lv))
     return keys
 
 
@@ -498,13 +510,19 @@ def main():
             "skills": sk,
         })
 
-    curves = {}
+    curves, lpid_of = {}, {}
     for g, prop in sorted(needed_curve):
-        by = curves.setdefault(str(g), {})
-        for lv in LEVELS:
-            v = curve(g, lv).get(prop)
-            if v is not None:
-                by.setdefault(str(lv), {})[prop] = v
+        lpid_of.setdefault(str(g), {})
+        for sr, _cap in subrank_cap:
+            lp_ = group_level.get((g, sr))
+            if lp_:
+                lpid_of[str(g)][sr] = lp_
+        for lp_ in group_lpids(g):
+            by = curves.setdefault(str(lp_), {})
+            for lv in LEVELS:
+                v = curve_at(lp_, lv).get(prop)
+                if v is not None:
+                    by.setdefault(str(lv), {})[prop] = v
 
     data = {
         "qualities": QORDER,
@@ -512,8 +530,11 @@ def main():
         "rankLabels": {str(rk): rank_label[rk] for rk in sorted(rank_label)},
         "rankQuality": {str(rk): rank_quality[rk] for rk in sorted(rank_quality)},
         "levels": LEVELS,
-        "subranks": {str(cap): L(f"SubRank.{sr}") or sr for sr, cap in subrank_cap},
-        "defaultLevel": 100 if 100 in LEVELS else LEVELS[len(LEVELS) // 2],
+        "subranks": [{"id": sr, "cap": cap, "name": L(f"SubRank.{sr}") or sr}
+                     for sr, cap in subrank_cap],
+        "defaultSubrank": "Silver3",
+        "defaultLevel": 100,
+        "lpidOf": lpid_of,
         "curves": curves,
         "stats": [{"key": k, "label": lb, "pct": k in PCT} for k, lb in STATS],
         "tiers": [{"tier": t, "classes": tiers[t]} for t in sorted(tiers)],
@@ -547,7 +568,8 @@ def main():
                             out = dict(s["vals"].get(str(rk), {}))
                             for pr, m in s["lmult"].get(str(rk), {}).items():
                                 g = str(s["lgroup"][pr])
-                                base = data["curves"].get(g, {}).get("100", {}).get(pr)
+                                lp_ = data["lpidOf"].get(g, {}).get("Silver3")
+                                base = data["curves"].get(str(lp_), {}).get("100", {}).get(pr)
                                 if base is not None:
                                     out[pr] = round(base * m, 2)
                             print(f"   {data['rankLabels'][str(rk)]:<14} {out}")
