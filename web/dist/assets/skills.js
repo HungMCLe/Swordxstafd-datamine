@@ -1,6 +1,4 @@
-/* Skill quality stepper.
-   Each .skill[data-skill] carries its own per-quality numbers; the < > buttons
-   walk the quality ladder and re-render the stat list. */
+/* Skills page: class-tree picker + per-skill quality stepper. */
 (function () {
   "use strict";
 
@@ -9,11 +7,13 @@
     Mythic: "q-mythic", Divine: "q-divine", Immortal: "q-immortal"
   };
 
-  function fmt(key, val, isPct) {
+  function fmt(val, isPct, isDirect) {
+    if (isDirect) return val.toFixed(1).replace(/\.0$/, "") + "%";
     if (isPct) return (val / 100).toFixed(1).replace(/\.0$/, "") + "%";
     return Math.round(val).toLocaleString("en-US");
   }
 
+  /* ---------- quality stepper ---------- */
   function Card(el) {
     var raw = el.getAttribute("data-skill");
     if (!raw) return null;
@@ -26,8 +26,7 @@
     var i = 0;
 
     function render() {
-      var q = d.order[i];
-      var entry = d.q[q];
+      var q = d.order[i], entry = d.q[q];
       if (nameEl) {
         nameEl.textContent = q;
         nameEl.className = "qname " + (QCLASS[q] || "");
@@ -37,7 +36,7 @@
         var out = "";
         Object.keys(entry.vals).forEach(function (k) {
           out += '<div class="row"><dt>' + (d.labels[k] || k) + "</dt>" +
-                 '<dd>' + fmt(k, entry.vals[k], d.pct[k]) + "</dd></div>";
+                 "<dd>" + fmt(entry.vals[k], d.pct[k], d.direct && d.direct[k]) + "</dd></div>";
         });
         dl.innerHTML = out;
       }
@@ -49,21 +48,14 @@
 
     el.querySelectorAll(".qbtn").forEach(function (b) {
       b.addEventListener("click", function () {
-        var dir = parseInt(b.getAttribute("data-dir"), 10);
-        var n = i + dir;
+        var n = i + parseInt(b.getAttribute("data-dir"), 10);
         if (n < 0 || n >= d.order.length) return;
-        i = n;
-        render();
+        i = n; render();
       });
     });
 
     render();
-    return {
-      setQuality: function (q) {
-        var n = d.order.indexOf(q);
-        if (n >= 0) { i = n; render(); }
-      }
-    };
+    return { setQuality: function (q) { var n = d.order.indexOf(q); if (n >= 0) { i = n; render(); } } };
   }
 
   var cards = [];
@@ -81,4 +73,28 @@
       cards.forEach(function (c) { c.setQuality(q); });
     });
   });
+
+  /* ---------- class tree ---------- */
+  var nodes = Array.prototype.slice.call(document.querySelectorAll(".cnode"));
+
+  function select(id, push) {
+    var panel = document.getElementById("cls-" + id);
+    if (!panel) return;
+    document.querySelectorAll(".panel").forEach(function (p) { p.hidden = true; });
+    panel.hidden = false;
+    nodes.forEach(function (n) {
+      n.setAttribute("aria-current", String(n.getAttribute("data-cls") === id));
+    });
+    if (push && history.replaceState) history.replaceState(null, "", "#" + id);
+  }
+
+  nodes.forEach(function (n) {
+    n.addEventListener("click", function () { select(n.getAttribute("data-cls"), true); });
+  });
+
+  var initial = (location.hash || "").replace(/^#/, "");
+  if (!initial || !document.getElementById("cls-" + initial)) {
+    initial = nodes.length ? nodes[0].getAttribute("data-cls") : "";
+  }
+  if (initial) select(initial, false);
 })();

@@ -125,6 +125,50 @@ for r in table("entity_prop_skill"):
         continue
     eps[eid] = r
 
+# ---------------- status (buff/debuff) entities ----------------
+status_scale = {}
+for r in table("level_prop_status"):
+    try:
+        cid, rk = int(r["class_id"]), int(r["level"])
+    except Exception:
+        continue
+    d = {}
+    for k, v in r.items():
+        if k in ("class_id", "level") or not v.strip():
+            continue
+        try:
+            d[k] = int(v)
+        except Exception:
+            pass
+    status_scale[(cid, rk)] = d
+
+status_ent = {}
+for r in table("entity_prop_status"):
+    try:
+        status_ent[int(r["EntityId"])] = r
+    except Exception:
+        pass
+
+# props we never surface (bookkeeping / duplicated elsewhere)
+SKIP = {"EntityId", "Memo", "Memo2", "PvpPropScale", "RankPropId", "GroupLevelPropId",
+        "SubRankPropId", "AffectedBySkillRank", "class_id", "level"}
+
+prop_float = {}
+for r in table("prop_cfg"):
+    pt = (r.get("PropType") or "").strip()
+    if pt:
+        prop_float[pt] = (r.get("Float") or "").strip().upper() == "TRUE"
+
+def nice(k):
+    lab = L(f"PropType.{k}")
+    if not lab:
+        import re as _r
+        lab = _r.sub(r"(?<!^)(?=[A-Z])", " ", k)
+    lab = (lab.replace("Status Fixed Add", "Flat status effect ")
+              .replace("StatusFixedAdd", "Flat status effect ")
+              .replace("Status Add", "Status effect "))
+    return lab.strip()
+
 # ---------------- skills ----------------
 skills = {}
 for r in table("skill"):
@@ -177,6 +221,50 @@ def skill_entry(cid):
         "sort": (s.get("SkillSortTypes") or "").strip(),
         "maxRank": maxrank, "entity": eid, "kind": "active", "qualities": {},
     }
+    # buff/debuff skills: numbers live on the status entities the skill points at
+    view = [v for v in ints(s.get("ViewPropEntities")) if v in status_ent]
+    if view:
+        sbase, srank = {}, 0
+        for vid in view:
+            row = status_ent[vid]
+            try:
+                srank = int(row.get("RankPropId") or 0) or srank
+            except Exception:
+                pass
+            for k, v in row.items():
+                if k in SKIP or not str(v).strip() or str(v).strip() == "0":
+                    continue
+                try:
+                    sbase[k] = int(v)
+                except Exception:
+                    pass
+        if sbase and srank:
+            avail = [rk for (c_, rk) in status_scale if c_ == srank]
+            smax = max(avail) if avail else 0
+            entry["kind"] = "buff"
+            entry["statusBase"] = sbase
+            entry["maxRank"] = entry["maxRank"] or smax
+            for q in QORDER:
+                rk = quality_first_rank.get(q)
+                if rk is None or rk > smax:
+                    continue
+                sc = status_scale.get((srank, rk), {})
+                vals = dict(entry["qualities"].get(q, {}).get("vals", {}))
+                labels = {}
+                for k, bv in sbase.items():
+                    mult = sc.get(k)
+                    if mult is None:
+                        continue
+                    if prop_float.get(k, True):          # percentage-style prop
+                        vals["ST:" + k] = round(bv / 10000.0 * (mult / 10000.0) * 100, 2)
+                    else:                                 # flat value
+                        vals["ST:" + k] = round(bv * (mult / 10000.0), 1)
+                    labels[k] = nice(k)
+                if vals:
+                    entry["qualities"][q] = {"rank": rk, "vals": vals}
+            entry["statusLabels"] = {("ST:" + k): nice(k) for k in sbase}
+            entry["statusPct"] = {("ST:" + k): prop_float.get(k, True) for k in sbase}
+
     if not ep:
         # passive: value = PassivePropFactors x passive rank scale
         if factors and p_rankprop:
@@ -225,7 +313,8 @@ def skill_entry(cid):
         if rk is None or rk > maxrank:
             continue
         sc = rank_scale.get((rankprop, rk), {})
-        vals = {}
+        # keep anything the status merge already put here
+        vals = dict(entry["qualities"].get(q, {}).get("vals", {}))
         for key in base:
             mult = sc.get(key)
             eff = base[key] * (mult / 10000.0) if mult is not None else float(base[key])
