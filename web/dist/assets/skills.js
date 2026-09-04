@@ -1,62 +1,97 @@
-/* Skills page: class-tree picker + per-skill quality stepper. */
+/* Skills page: class-tree picker, per-skill rank stepper, character level. */
 (function () {
   "use strict";
+
+  var G = {};
+  try { G = JSON.parse(document.getElementById("skilldata").textContent); }
+  catch (e) { return; }
 
   var QCLASS = {
     Rare: "q-rare", Epic: "q-epic", Legendary: "q-legendary",
     Mythic: "q-mythic", Divine: "q-divine", Immortal: "q-immortal"
   };
 
-  function fmt(val, isPct, isDirect) {
-    if (isDirect) return val.toFixed(1).replace(/\.0$/, "") + "%";
-    if (isPct) return (val / 100).toFixed(1).replace(/\.0$/, "") + "%";
-    return Math.round(val).toLocaleString("en-US");
+  var level = G.defaultLevel;
+
+  function fmt(v, isPct) {
+    if (isPct) return (Math.round(v * 10) / 10).toFixed(1).replace(/\.0$/, "") + "%";
+    if (Math.abs(v) < 10) return String(Math.round(v * 100) / 100);
+    return Math.round(v).toLocaleString("en-US");
   }
 
-  /* ---------- quality stepper ---------- */
+  /* ---------- one card ---------- */
   function Card(el) {
     var raw = el.getAttribute("data-skill");
     if (!raw) return null;
     var d;
     try { d = JSON.parse(raw); } catch (e) { return null; }
-    if (!d.order || !d.order.length) return null;
+    if (!d.ranks || !d.ranks.length) return null;
 
     var nameEl = el.querySelector(".qname");
     var dl = el.querySelector(".sk-stats");
     var i = 0;
 
+    /* every prop this skill shows, in a stable order */
+    var props = [];
+    Object.keys(d.labels).forEach(function (k) { props.push(k); });
+
+    function valueOf(prop, rank) {
+      var direct = d.vals[rank];
+      if (direct && direct[prop] !== undefined) return direct[prop];
+      var mult = d.lmult[rank];
+      if (!mult || mult[prop] === undefined) return undefined;
+      var curve = G.curves[d.lgroup[prop]];
+      if (!curve) return undefined;
+      var row = curve[level];
+      if (!row || row[prop] === undefined) return undefined;
+      return row[prop] * mult[prop];
+    }
+
     function render() {
-      var q = d.order[i], entry = d.q[q];
+      var rank = String(d.ranks[i]);
+      var q = G.rankQuality[rank] || "";
       if (nameEl) {
-        nameEl.textContent = q;
+        nameEl.textContent = G.rankLabels[rank] || rank;
         nameEl.className = "qname " + (QCLASS[q] || "");
-        nameEl.title = "Rank " + entry.rank;
+        nameEl.title = "Rank " + rank + " of 34";
       }
       if (dl) {
         dl.className = "sk-stats " + (QCLASS[q] || "");
         var out = "";
-        Object.keys(entry.vals).forEach(function (k) {
-          out += '<div class="row"><dt>' + (d.labels[k] || k) + "</dt>" +
-                 "<dd>" + fmt(entry.vals[k], d.pct[k], d.direct && d.direct[k]) + "</dd></div>";
+        props.forEach(function (p) {
+          var v = valueOf(p, rank);
+          if (v === undefined) return;
+          out += '<div class="row"><dt>' + d.labels[p] + "</dt><dd>" +
+                 fmt(v, d.pct[p]) + "</dd></div>";
         });
         dl.innerHTML = out;
       }
       el.querySelectorAll(".qbtn").forEach(function (b) {
         var dir = parseInt(b.getAttribute("data-dir"), 10);
-        b.disabled = (dir < 0 && i === 0) || (dir > 0 && i === d.order.length - 1);
+        b.disabled = (dir < 0 && i === 0) || (dir > 0 && i === d.ranks.length - 1);
       });
     }
 
     el.querySelectorAll(".qbtn").forEach(function (b) {
       b.addEventListener("click", function () {
         var n = i + parseInt(b.getAttribute("data-dir"), 10);
-        if (n < 0 || n >= d.order.length) return;
+        if (n < 0 || n >= d.ranks.length) return;
         i = n; render();
       });
     });
 
     render();
-    return { setQuality: function (q) { var n = d.order.indexOf(q); if (n >= 0) { i = n; render(); } } };
+    return {
+      redraw: render,
+      setQuality: function (quality) {
+        var first = G.qualityRanks[quality];
+        if (first === undefined || first === null) return;
+        for (var n = 0; n < d.ranks.length; n++) {
+          if (d.ranks[n] >= first) { i = n; break; }
+        }
+        render();
+      }
+    };
   }
 
   var cards = [];
@@ -73,6 +108,28 @@
       });
       cards.forEach(function (c) { c.setQuality(q); });
     });
+  });
+
+  var sel = document.getElementById("lvl");
+  if (sel) {
+    sel.addEventListener("change", function () {
+      level = sel.value;
+      cards.forEach(function (c) { c.redraw(); });
+    });
+  }
+
+  /* ---------- keyword tooltips: hover on a pointer, tap on a touchscreen ---- */
+  document.addEventListener("click", function (ev) {
+    var kw = ev.target.closest ? ev.target.closest(".sk-desc .kw") : null;
+    document.querySelectorAll(".kw.open").forEach(function (o) {
+      if (o !== kw) o.classList.remove("open");
+    });
+    if (kw) { kw.classList.toggle("open"); ev.preventDefault(); }
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") {
+      document.querySelectorAll(".kw.open").forEach(function (o) { o.classList.remove("open"); });
+    }
   });
 
   /* ---------- class tree ---------- */

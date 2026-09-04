@@ -67,38 +67,26 @@ def render(layout, data, iconset):
                 sid = s["id"]
                 icon = (f'<img src="../assets/skills/skill_{sid}.png" alt="" width="44" height="44" loading="lazy">'
                         if f"skill_{sid}.png" in iconset else '<span class="sk-noicon"></span>')
-                qs = s.get("qualities") or {}
-                have = [q for q in qualities if q in qs]
+                ranks = s.get("ranks") or []
                 desc = richtext((s.get("desc") or "").strip(), s.get("links"))
-                kind = s.get("kind", "active")
-                tname = s.get("type") or ("Charm" if kind == "passive" else "Technique")
+                tname = s.get("type") or "Technique"
                 pill = f'<span class="sk-kind {tname.lower()}">{tname}</span>'
-                if have:
-                    keys = {k for q in have for k in qs[q]["vals"]}
-                    labels = {}
-                    for k in keys:
-                        labels[k] = (s.get("statusLabels", {}).get(k)
-                                     or statlabel.get(k)
-                                     or re.sub(r"(?<!^)(?=[A-Z])", " ", k.replace("ST:", ""))
-                                       .replace("Status Fixed Add", "Flat status effect ")
-                                       .replace("Status Add", "Status effect "))
+                if ranks:
                     payload = html.escape(json.dumps(
-                        {"q": {q: qs[q] for q in have}, "order": have, "labels": labels,
-                         "pct": {k: ispct.get(k, False) for k in keys},
-                         "direct": {k: bool(s.get("statusPct", {}).get(k, False)) for k in keys}},
+                        {"ranks": ranks, "vals": s["vals"], "lmult": s["lmult"],
+                         "lgroup": s["lgroup"], "labels": s["labels"], "pct": s["pct"]},
                         ensure_ascii=False), quote=True)
                     stepper = ('<div class="qstep">'
-                               '<button type="button" class="qbtn" data-dir="-1" aria-label="Lower quality">&lsaquo;</button>'
+                               '<button type="button" class="qbtn" data-dir="-1" aria-label="Lower rank">&lsaquo;</button>'
                                '<span class="qname"></span>'
-                               '<button type="button" class="qbtn" data-dir="1" aria-label="Higher quality">&rsaquo;</button>'
+                               '<button type="button" class="qbtn" data-dir="1" aria-label="Higher rank">&rsaquo;</button>'
                                '</div>')
                     stats = '<dl class="sk-stats"></dl>'
                     attr = f' data-skill="{payload}"'
                 else:
                     stepper = ''
-                    stats = ('<p class="sk-flat">Flat-stat Charm — scales with character level, '
-                             'not with quality.</p>' if kind == "passive"
-                             else '<p class="sk-flat">No per-quality values in the config for this one.</p>')
+                    stats = ('<p class="sk-flat">The game&rsquo;s own scaling chain defines no '
+                             'value for this one — its effect is written into the description.</p>')
                     attr = ''
                 cards.append(
                     f'<article class="skill"{attr}>'
@@ -106,53 +94,75 @@ def render(layout, data, iconset):
                     f'<span class="sk-meta">{pill}<span class="sk-num">#{sid}</span></span></div>{stepper}</div>'
                     + (f'<p class="sk-desc">{desc}</p>' if desc else '')
                     + stats + '</article>')
-            withn = sum(1 for s in c["skills"] if s.get("qualities"))
+            withn = sum(1 for s in c["skills"] if s.get("ranks"))
             panels.append(
                 f'<section class="panel" id="cls-{html.escape(c["id"])}" hidden>'
                 f'<div class="panel-head">{cicon(c, 40)}<div><h2>{html.escape(c["name"])}</h2>'
                 f'<p class="panel-sub">Tier {tier_of[c["id"]]}'
                 + (f' · promotes from {html.escape(en_of.get(c["prePro"], c["prePro"]))}'
                    if c.get("prePro") and c["prePro"] != "None" else '')
-                + f' · {len(c["skills"])} skills, {withn} with per-quality values</p></div></div>'
+                + f' · {len(c["skills"])} skills, {withn} with per-rank values</p></div></div>'
                 f'<div class="skillgrid">{"".join(cards)}</div></section>')
+
+    levelopts = "".join(
+        f'<option value="{lv}"{" selected" if lv == data["defaultLevel"] else ""}>'
+        f'{lv} &middot; {html.escape(data["subranks"].get(str(lv), ""))}</option>'
+        for lv in data["levels"])
+    globaljson = json.dumps({k: data[k] for k in
+                             ("rankLabels", "rankQuality", "qualityRanks",
+                              "levels", "curves", "defaultLevel")},
+                            ensure_ascii=False).replace("</", "<\\/")
 
     body = f"""
 <div class="wrap">
 <p class="eyebrow">Skills</p>
-<h1>Every skill, at every quality</h1>
-<p class="lede">Two base classes branch into four lines, each promoting through seven tiers.
-Pick a class, then step any skill from Rare to Immortal — the values move, and take the colour of the
-quality you are on.</p>
+<h1>Every skill, at every rank</h1>
+<p class="lede">A skill carries a quality <i>and</i> a level inside it — the game writes them
+together as <b>Divine&nbsp;+3</b>. There are 34 steps from Rare&nbsp;+0 to Immortal&nbsp;+10.
+Pick a class, then step any skill one rank at a time and watch the numbers move.</p>
 
 {tree}
 
-<div class="qglobal">
-  <span class="qglabel">Set every skill to</span>
-  <div class="qallrow">
-    {"".join(f'<button type="button" class="qall q-{q.lower()}" data-q="{q}">{q}</button>' for q in qualities)}
+<div class="controls">
+  <div class="ctl">
+    <span class="ctl-label">Set every skill to</span>
+    <div class="qallrow">
+      {"".join(f'<button type="button" class="qall q-{q.lower()}" data-q="{q}">{q}</button>' for q in qualities)}
+    </div>
+  </div>
+  <div class="ctl">
+    <span class="ctl-label">Character level</span>
+    <div class="lvlrow">
+      <select id="lvl" aria-label="Character level">
+        {levelopts}
+      </select>
+      <span class="ctl-note">Flat values ride a growth curve picked by your rank; coefficients do not.</span>
+    </div>
   </div>
 </div>
+
+<script type="application/json" id="skilldata">{globaljson}</script>
 
 {"".join(panels)}
 
 <div class="note">
-<p><b>Where the numbers come from.</b> Damage skills use their base coefficient times a rank scale
-(<code>level_prop_skill</code>); buffs and debuffs read the status entity the skill points at through
-<code>ViewPropEntities</code>, scaled by <code>level_prop_status</code>. Quality is a band of ranks, so each
-step shows the value at the <i>first</i> rank of that quality. Coefficients are a percentage of ATK;
-flat values are raw.</p>
-<p><b>Descriptions are the game's own.</b> All 328 are shown exactly as the client renders them, keeping
-its colour markup — element names in their element colour, and game keywords like <span class="kw">grid</span>
-or <span class="kw">base chance</span> highlighted. Fixed figures written into the text (chances, ranges,
-hit counts) are picked out in bold; those do not change with quality. The values that <i>do</i> change are the
-ones in the stat list, which take the colour of the quality you have selected.</p>
+<p><b>Rank and level are two different things.</b> <code>skill_rank</code> lists 34 ranks grouped into six
+qualities, and its <code>RankAddition</code> column is the number the game prints after the quality name.
+Rare spans 2 ranks, Epic 3, Legendary 4, Mythic 6, Divine 8 and Immortal 11 — so Divine&nbsp;+7 is a real
+step above Divine&nbsp;+0, not a relabelling.</p>
+<p><b>Where the numbers come from.</b> Straight out of the game's own
+<code>BattleFormulaHandler.CalcSkillProps</code>: a base read from the growth curve for your rank at your
+level, scaled per-property by the rank table, then by the skill's own factors, and for Charms once more by
+a rank factor. Coefficients — the percentages of ATK — sit outside that curve, so they move with rank only.
+Flat figures (damage, healing, shields, and the stats a Charm grants) move with <i>both</i>, which is why
+the character-level control above changes them and leaves the percentages alone.</p>
 <p><b>Two kinds, as the game splits them:</b> 166 <b>Techniques</b> and 162 <b>Charms</b>.
-Every highlighted keyword carries the game's own explanation on hover — all 393 of them resolve, including
-the summoned units named by summon skills.</p>
-<p><b>241 of 328 skills</b> have per-quality values. The rest are flat-stat Charms, which the rank tables
-do not scale at all — they grow with character level instead. Those say so on the card.</p>
+Descriptions are the client's own text, colour markup intact, and every highlighted keyword carries the
+game's explanation on hover — all 393 resolve, including the units named by summon skills.</p>
+<p><b>272 of 328 skills</b> have per-rank values. For the rest the config's scaling chain produces nothing
+at all — their effect is described in words rather than a scaled number — and those cards say so.</p>
 </div>
 </div>
 <script src="../assets/skills.js" defer></script>
 """
-    return layout("Skills", "Every Sword x Staff class skill by tier and class line, with exact values at Rare, Epic, Legendary, Mythic, Divine and Immortal.", body, "skills", 1)
+    return layout("Skills", "Every Sword x Staff class skill at all 34 ranks, from Rare +0 to Immortal +10, with the values the game's own formula produces.", body, "skills", 1)

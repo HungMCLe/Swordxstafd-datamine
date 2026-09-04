@@ -16,7 +16,7 @@ web/
       style.css
       icons/      113 item icons extracted from the game
       skills/     328 skill icons
-      skills.js   client-side quality stepper
+      skills.js   client-side rank stepper + character-level control
     index.html  method.html  top-up-ladder.html  combat/*.html
 ```
 
@@ -40,7 +40,7 @@ That regenerates every page into `web/dist/`. Commit the result; Vercel deploys 
 | Combat pages | `out/decompiled/Console/Common/BattleFormulaHandler.cs` |
 | Elemental / crit tables | `out/config_decrypted/level_prop_battle_extra` + `player_subrank` + `role_prop_group` |
 | Top-up ladder | `out/config_decrypted/accumulated_pay_award` |
-| Skills | `profession_base` (tier/class) + `skill` + `entity_prop_skill` (coefficients) + `level_prop_skill` (rank scale) + `skill_rank` (rank→quality) |
+| Skills | `profession_base` (tier/class) + `skill` + `skill_rank` (34 ranks -> quality +N) + `entity_prop_skill` / `entity_prop_status` (factors) + `entity_prop_group_level` -> `level_prop_skill_*` (rank scale and level growth curve) |
 | Every name | `out/localization/text_en_US.bytes`, looked up by `XXHash64(key, seed=0)` |
 
 Names are never hand-translated — see `build.py:L()`. Keys follow the game's own patterns
