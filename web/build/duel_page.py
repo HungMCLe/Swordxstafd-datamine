@@ -79,23 +79,27 @@ def render(layout, base_tables, dist: Path, out: Path):
             f'<input type="number" id="{side}_{i}" value="{v}" step="{st}"></label>'
             for i, lab, v, hint, st in FIELDS)
 
-    def slots(side):
+    def slots(side, kind, n0, count):
         return "".join(
-            f'<button type="button" class="slot" id="{side}_slot{n}" data-side="{side}" '
-            f'data-slot="{n}"><span class="slotnum">{n + 1}</span></button>' for n in range(8))
+            f'<button type="button" class="slot {kind}" id="{side}_slot{n}" data-side="{side}" '
+            f'data-slot="{n}" data-kind="{kind}"><span class="slotnum">{n - n0 + 1}</span></button>'
+            for n in range(n0, n0 + count))
 
     body = f"""
 <div class="wrap wide">
 <p class="eyebrow">Combat mechanics</p>
 <h1>Duel simulator</h1>
-<p class="lede">Give both sides a sheet and eight Techniques, and this runs the fight: the turn clock from
+<p class="lede">Give both sides a sheet and a real loadout &mdash; four Techniques and four Charms, as the game allows &mdash; and this runs the fight: the turn clock from
 <code>SpeedToTime</code>, cooldowns from each skill's own CD, and every hit through
 <code>Damage()</code> with crit and block rolled rather than averaged. A thousand fights, then the odds.</p>
 
 <div class="duel">
-  <section class="side" data-side="a">
+  <section class="duelside" data-side="a">
     <h2 class="sidehead"><span class="dot a"></span>You</h2>
-    <div class="slotgrid">{slots("a")}</div>
+    <p class="slotlabel">4 Techniques</p>
+    <div class="slotgrid">{slots("a", "tech", 0, 4)}</div>
+    <p class="slotlabel">4 Charms</p>
+    <div class="slotgrid">{slots("a", "charm", 4, 4)}</div>
     <details class="statbox" open><summary>Stats</summary>
       <div class="calcgrid tight">{sheet("a")}
         <label>Rank<select id="a_rank">{ropts}</select></label>
@@ -105,9 +109,12 @@ def render(layout, base_tables, dist: Path, out: Path):
     </details>
   </section>
 
-  <section class="side" data-side="b">
+  <section class="duelside" data-side="b">
     <h2 class="sidehead"><span class="dot b"></span>Opponent</h2>
-    <div class="slotgrid">{slots("b")}</div>
+    <p class="slotlabel">4 Techniques</p>
+    <div class="slotgrid">{slots("b", "tech", 0, 4)}</div>
+    <p class="slotlabel">4 Charms</p>
+    <div class="slotgrid">{slots("b", "charm", 4, 4)}</div>
     <details class="statbox"><summary>Stats</summary>
       <div class="calcgrid tight">{sheet("b")}
         <label>Rank<select id="b_rank">{ropts}</select></label>
@@ -120,12 +127,14 @@ def render(layout, base_tables, dist: Path, out: Path):
 
 <div class="runbar">
   <button type="button" id="run" class="runbtn">Run 1,000 duels</button>
+  <button type="button" id="reset" class="pickbtn">Reset to defaults</button>
   <label class="mirror"><input type="checkbox" id="mirror" checked> mirror my sheet onto the opponent</label>
 </div>
 
 <div id="result" class="result" hidden>
   <div class="odds"><div class="oddsbar"><span id="oddsa"></span><span id="oddsb"></span></div>
     <p id="oddstext"></p></div>
+  <p id="charmnote" class="verdict"></p>
   <div id="hpchart"></div>
   <h3>One representative fight</h3>
   <div class="tablewrap"><table class="log"><thead><tr>
@@ -135,7 +144,7 @@ def render(layout, base_tables, dist: Path, out: Path):
 
 <dialog id="picker" class="picker">
   <div class="pickhead">
-    <input type="search" id="pickfind" placeholder="Search 162 Techniques&hellip;" autocomplete="off">
+    <input type="search" id="pickfind" placeholder="Search&hellip;"  autocomplete="off">
     <button type="button" id="pickclear" class="pickbtn">Clear slot</button>
     <button type="button" id="pickclose" class="pickbtn">Close</button>
   </div>
