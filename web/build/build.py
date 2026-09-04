@@ -44,6 +44,7 @@ def csvrows(name):
 NAV = [
     ("Home",            "index.html",              "home"),
     ("Combat mechanics","combat/index.html",       "combat"),
+    ("Skills",          "combat/skills.html",      "skills"),
     ("Top-up ladder",   "top-up-ladder.html",      "topup"),
     ("Method",          "method.html",             "method"),
 ]
@@ -140,7 +141,7 @@ inferred from testing, or translated by hand.</p>
   <div class="fact"><b>3,249</b><span>Config tables read</span></div>
   <div class="fact"><b>4,349</b><span>Lines of combat code</span></div>
   <div class="fact"><b>353</b><span>Stats catalogued</span></div>
-  <div class="fact"><b>75</b><span>Top-up tiers</span></div>
+  <div class="fact"><b>328</b><span>Class skills</span></div>
 </div>
 
 <h2>Start here</h2>
@@ -157,6 +158,10 @@ inferred from testing, or translated by hand.</p>
     <h3>SPD and turn order</h3>
     <p>Speed is not initiative — it buys turn frequency, on a square root. What that actually costs.</p>
     <span class="tag">Combat</span></a>
+  <a class="card" href="combat/skills.html"><span class="rail"></span>
+    <h3>Skill database</h3>
+    <p>All 328 class skills across seven tiers, with a stepper that walks each one from Rare to Immortal.</p>
+    <span class="tag">Skills</span></a>
   <a class="card gold" href="top-up-ladder.html"><span class="rail"></span>
     <h3>Top-up ladder</h3>
     <p>All 75 cumulative spending tiers, $5 to $150,000, with every reward and its real icon.</p>
@@ -176,8 +181,7 @@ were read, so anything here can be re-checked or challenged.</p>
 </div>
 
 <h2>Coming next</h2>
-<p>A full skill database — every skill at every level and rarity, for all classes, with the exact coefficients
-and how rarity changes the numbers.</p>
+<p>Equipment and relic sets, monster stat tables, and the drop rules behind them.</p>
 </div>
 """
     return layout("Home", "Datamined reference for Sword x Staff: combat formulas, stat tables and the top-up ladder, read from the game's own config files.", body, "home", 0)

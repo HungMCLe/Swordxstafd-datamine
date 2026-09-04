@@ -8,10 +8,15 @@ web/
   build/          generator (run locally, commits its output)
     build.py      layout, localisation lookup, config readers, home/method/combat pages
     site.py       entry point — remaining pages + main()
+    skills_data.py    builds out/_skills.json (tier -> class -> skill, per-quality stats)
+    skills_page.py    renders the skills page
+    extract_skill_icons.py
   dist/           what Vercel serves. Committed.
     assets/
       style.css
       icons/      113 item icons extracted from the game
+      skills/     328 skill icons
+      skills.js   client-side quality stepper
     index.html  method.html  top-up-ladder.html  combat/*.html
 ```
 
@@ -22,6 +27,7 @@ Needs the extracted data in `../out/` (not committed — it is ~3 GB and contain
 ```bash
 pip install xxhash pillow
 cd web/build
+python skills_data.py   # regenerates out/_skills.json
 python site.py
 ```
 
@@ -34,6 +40,7 @@ That regenerates every page into `web/dist/`. Commit the result; Vercel deploys 
 | Combat pages | `out/decompiled/Console/Common/BattleFormulaHandler.cs` |
 | Elemental / crit tables | `out/config_decrypted/level_prop_battle_extra` + `player_subrank` + `role_prop_group` |
 | Top-up ladder | `out/config_decrypted/accumulated_pay_award` |
+| Skills | `profession_base` (tier/class) + `skill` + `entity_prop_skill` (coefficients) + `level_prop_skill` (rank scale) + `skill_rank` (rank→quality) |
 | Every name | `out/localization/text_en_US.bytes`, looked up by `XXHash64(key, seed=0)` |
 
 Names are never hand-translated — see `build.py:L()`. Keys follow the game's own patterns
