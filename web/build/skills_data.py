@@ -63,54 +63,128 @@ def ints(s):
     return [int(v)]
 
 # ---------------- quality ladder ----------------
+# skill_rank is the game's own ladder: 34 ranks grouped into six qualities, and
+# RankAddition ("+ how much", per the config's own comment) is the level the
+# game prints beside the quality — Rare +0 .. Immortal +10.
 QUALITY_EN = {"Blue": "Rare", "Purple": "Epic", "Orange": "Legendary",
               "Gold": "Mythic", "Red": "Divine", "Rainbow": "Immortal"}
 QORDER = ["Rare", "Epic", "Legendary", "Mythic", "Divine", "Immortal"]
 
 rank_quality = {}          # rank -> english quality
+rank_label = {}            # rank -> "Divine +3"
 quality_first_rank = {}    # english quality -> lowest rank
 for r in table("skill_rank"):
-    rk = int(r["Rank"])
+    try:
+        rk = int(r["Rank"])
+    except Exception:
+        continue
     q = QUALITY_EN.get(r["Quality"].strip())
     if not q:
         continue
+    try:
+        add = int(r.get("RankAddition") or 0)
+    except Exception:
+        add = 0
     rank_quality[rk] = q
+    rank_label[rk] = f"{q} +{add}"
     quality_first_rank.setdefault(q, rk)
 
-# ---------------- rank scaling ----------------
-# level_prop_skill: class_id = RankPropId, level = rank, values are x10000 multipliers
-rank_scale = {}
-for r in table("level_prop_skill"):
-    try:
-        cid, rk = int(r["class_id"]), int(r["level"])
-    except Exception:
-        continue
-    d = {}
-    for k, v in r.items():
-        if k in ("class_id", "level") or not v.strip():
-            continue
+# ---------------- the game's own prop maths ----------------
+# BattleFormulaHandler.CalcSkillProps(rankPropId, levelPropId, rankFactorId,
+#                                     propFactors, rank, level):
+#     base = levelProp[levelPropId][level]
+#     d    = ScaleProps(base, levelProp[rankPropId][rank])    per-prop x/10000
+#     d    = ScaleProps(d, propFactors, removeUnscaled=true)  keeps base n factors
+#     d    = ScaleSrcProps(d, levelProp[rankFactorId][rank])  when set (passives)
+# LevelPropParser is a single lookup across every level_prop_* table, keyed by
+# class_id, so the tables below are merged into one (class_id, level) map.
+LEVEL_TABLES = ["level_prop_skill", "level_prop_skill_passive",
+                "level_prop_skill_passive_main", "level_prop_skill_passive_other",
+                "level_prop_skill_scale", "level_prop_status",
+                "level_prop_skill_fixed_prop", "level_prop_skill_all_fixed_prop"]
+levelprop = {}
+for _t in LEVEL_TABLES:
+    for r in table(_t):
         try:
-            d[k] = int(v)
+            _c, _l = int(r["class_id"]), int(r["level"])
         except Exception:
-            pass
-    rank_scale[(cid, rk)] = d
+            continue
+        d = levelprop.setdefault((_c, _l), {})
+        for k, v in r.items():
+            if k in ("class_id", "level"):
+                continue
+            v = (v or "").strip()
+            if not v:
+                continue
+            try:
+                d[k] = int(v)
+            except Exception:
+                pass
 
-# ---------------- passive rank scaling (percent props; level = rank) ----------
-passive_rank_scale = {}
-for r in table("level_prop_skill_passive"):
+_lp_levels = {}
+for (_c, _l) in levelprop:
+    _lp_levels.setdefault(_c, []).append(_l)
+for _c in _lp_levels:
+    _lp_levels[_c].sort()
+
+
+def scale_props(props, scale, remove_unscaled):
+    """BattleFormulaHandler.ScaleProps."""
+    out = {}
+    scale = scale or {}
+    for k, v in props.items():
+        m = scale.get(k)
+        if m is None:
+            if not remove_unscaled:
+                out[k] = v
+        else:
+            out[k] = v * (m / 10000.0)
+    return out
+
+
+# ---------------- character level -> subrank -> level curve ----------------
+# A skill carries a Rank *and* a Level (PlayerItemParamSkillWrap.EffectiveLevel),
+# and the level side reads a growth curve chosen by the character's subrank.
+subrank_cap = []
+for r in table("player_subrank"):
+    sr = (r.get("SubRank") or "").strip()
     try:
-        cid, rk = int(r["class_id"]), int(r["level"])
+        cap = int(r["LevelLimit"])
     except Exception:
         continue
-    d = {}
-    for k, v in r.items():
-        if k in ("class_id", "level") or not v.strip():
-            continue
-        try:
-            d[k] = int(v)
-        except Exception:
-            pass
-    passive_rank_scale[(cid, rk)] = d
+    if sr:
+        subrank_cap.append((sr, cap))
+MAXLEVEL = max(c for _, c in subrank_cap) if subrank_cap else 100
+
+def subrank_for(level):
+    for sr, cap in subrank_cap:
+        if level <= cap:
+            return sr
+    return subrank_cap[-1][0]
+
+group_level = {}
+for r in table("entity_prop_group_level"):
+    try:
+        group_level[(int(r["GroupId"]), (r.get("SubRank") or "").strip())] = int(r["LevelPropId"])
+    except Exception:
+        pass
+
+# the levels the site's character-level control offers: the game's own subrank caps
+LEVELS = [cap for _, cap in subrank_cap]
+
+def curve(group_id, level):
+    """levelProp[ entity_prop_group_level[group][subrank(level)] ][level]."""
+    lp = group_level.get((group_id, subrank_for(level)))
+    if not lp:
+        return {}
+    row = levelprop.get((lp, level))
+    if row is None:
+        # some curves are deliberately short — group 14 is flagged
+        # "fixed value, does not change" and defines level 1 only.
+        below = [l for l in _lp_levels.get(lp, []) if l <= level]
+        row = levelprop.get((lp, below[-1])) if below else None
+    return row or {}
+
 
 def parse_factors(s_):
     """{CritRatePercent:5000,CritRatePercentValue:5000} -> dict"""
@@ -251,6 +325,33 @@ STATS = [
 PCT = {"SkillAttack1", "SkillAttack2", "SkillAttack3", "SkillCureByAttack",
        "SkillCureByHp", "ShieldByAttack"}
 
+# (group, prop) pairs whose level curve the page has to ship
+needed_curve = set()
+
+
+def _acc(entry, prop, label, pct, level_dep, group, per_rank):
+    """Record one stat: either a finished number per rank, or a per-rank
+    multiplier that the page applies to the level curve."""
+    entry["labels"][prop] = label
+    entry["pct"][prop] = pct
+    if level_dep:
+        entry["lgroup"][prop] = group
+        needed_curve.add((group, prop))
+        for rk, v in per_rank.items():
+            entry["lmult"].setdefault(str(rk), {})[prop] = v
+    else:
+        for rk, v in per_rank.items():
+            entry["vals"].setdefault(str(rk), {})[prop] = v
+
+
+def _curve_props(group):
+    """Every prop the level curve for this group ever defines."""
+    keys = set()
+    for lv in LEVELS:
+        keys |= set(curve(group, lv))
+    return keys
+
+
 def skill_entry(cid):
     s = skills.get(cid)
     if not s:
@@ -262,122 +363,117 @@ def skill_entry(cid):
     except Exception:
         eid = 0
     ep = eps.get(eid)
-    factors = parse_factors(s.get("PassivePropFactors"))
-    try:
-        p_rankprop = int(s.get("PassiveRankPropId") or 0)
-    except Exception:
-        p_rankprop = 0
-    try:
-        maxrank = int(s.get("MaxRankLimit") or 0)
-    except Exception:
-        maxrank = 0
     entry = {
         "id": cid, "name": name, "desc": desc, "cn": s.get("Name", "").strip(),
         "tag": (s.get("OuterTag") or "").strip(),
         "sort": (s.get("SkillSortTypes") or "").strip(),
-        "maxRank": maxrank, "entity": eid, "kind": "active",
-        "type": TYPE_EN.get(item_type.get(cid, ""), ""), "qualities": {},
+        "entity": eid, "kind": "active",
+        "type": TYPE_EN.get(item_type.get(cid, ""), ""),
+        "vals": {}, "lmult": {}, "lgroup": {}, "labels": {}, "pct": {},
         "links": link_targets(s),
     }
-    # buff/debuff skills: numbers live on the status entities the skill points at
-    view = [v for v in ints(s.get("ViewPropEntities")) if v in status_ent]
-    if view:
-        sbase, srank = {}, 0
-        for vid in view:
-            row = status_ent[vid]
-            try:
-                srank = int(row.get("RankPropId") or 0) or srank
-            except Exception:
-                pass
-            for k, v in row.items():
-                if k in SKIP or not str(v).strip() or str(v).strip() == "0":
-                    continue
-                try:
-                    sbase[k] = int(v)
-                except Exception:
-                    pass
-        if sbase and srank:
-            avail = [rk for (c_, rk) in status_scale if c_ == srank]
-            smax = max(avail) if avail else 0
-            entry["kind"] = "buff"
-            entry["statusBase"] = sbase
-            entry["maxRank"] = entry["maxRank"] or smax
-            for q in QORDER:
-                rk = quality_first_rank.get(q)
-                if rk is None or rk > smax:
-                    continue
-                sc = status_scale.get((srank, rk), {})
-                vals = dict(entry["qualities"].get(q, {}).get("vals", {}))
-                labels = {}
-                for k, bv in sbase.items():
-                    mult = sc.get(k)
-                    if mult is None:
-                        continue
-                    if prop_float.get(k, True):          # percentage-style prop
-                        vals["ST:" + k] = round(bv / 10000.0 * (mult / 10000.0) * 100, 2)
-                    else:                                 # flat value
-                        vals["ST:" + k] = round(bv * (mult / 10000.0), 1)
-                    labels[k] = nice(k)
-                if vals:
-                    entry["qualities"][q] = {"rank": rk, "vals": vals}
-            entry["statusLabels"] = {("ST:" + k): nice(k) for k in sbase}
-            entry["statusPct"] = {("ST:" + k): prop_float.get(k, True) for k in sbase}
 
-    if not ep:
-        # passive: value = PassivePropFactors x passive rank scale
-        if factors and p_rankprop:
-            avail = [rk for (c_, rk) in passive_rank_scale if c_ == p_rankprop]
-            pmax = max(avail) if avail else 0
-            entry["maxRank"] = pmax
-            entry["kind"] = "passive"
-            entry["base"] = factors
-            for q in QORDER:
-                rk = quality_first_rank.get(q)
-                if rk is None or rk > pmax:
-                    continue
-                sc = passive_rank_scale.get((p_rankprop, rk), {})
-                vals = {}
-                for key, fv in factors.items():
-                    mult = sc.get(key)
-                    if mult is None:
-                        continue
-                    vals[key] = round(fv / 10000.0 * (mult / 10000.0) * 100, 2)
-                if vals:
-                    entry["qualities"][q] = {"rank": rk, "vals": vals}
-        return entry
-    try:
-        rankprop = int(ep.get("RankPropId") or 0)
-    except Exception:
-        rankprop = 0
-    # MaxRankLimit is blank for most skills; fall back to the highest rank the
-    # scaling table actually defines for this RankPropId.
-    if maxrank <= 0:
-        avail = [rk for (cid_, rk) in rank_scale if cid_ == rankprop]
-        maxrank = max(avail) if avail else 0
-        entry["maxRank"] = maxrank
-    base = {}
-    for key, _label in STATS:
-        v = (ep.get(key) or "").strip()
-        if v and v != "0":
+    def ranks_of(rank_prop_id):
+        # a skill's rank ladder is skill_rank's 34 steps; some scaling tables
+        # carry extra rows past that (level_prop_skill_passive_other runs to 200)
+        return sorted(l for l in _lp_levels.get(rank_prop_id, []) if l in rank_quality)
+
+    # ---- damage / heal / shield: entity_prop_skill ----
+    if ep:
+        try:
+            rankprop = int(ep.get("RankPropId") or 0)
+            group = int(ep.get("GroupLevelPropId") or 0)
+        except Exception:
+            rankprop = group = 0
+        rks = ranks_of(rankprop)
+        curve_keys = _curve_props(group)
+        for key, label in STATS:
+            v = (ep.get(key) or "").strip()
+            if not v or v == "0":
+                continue
             try:
-                base[key] = int(v)
+                fac = int(v)
             except Exception:
-                pass
-    if not base:
-        return entry
-    entry["base"] = base
-    for q in QORDER:
-        rk = quality_first_rank.get(q)
-        if rk is None or rk > maxrank:
+                continue
+            if key in curve_keys:
+                # base comes from the character-level curve; the entity column
+                # is a factor on it, exactly as CalcSkillProps applies it
+                _acc(entry, key, label, False, True, group,
+                     {rk: (levelprop.get((rankprop, rk), {}).get(key, 10000) / 10000.0)
+                          * (fac / 10000.0) for rk in rks})
+            else:
+                pct = key in PCT
+                _acc(entry, key, label, pct, False, 0,
+                     {rk: round(fac * (levelprop.get((rankprop, rk), {}).get(key, 10000) / 10000.0)
+                                * (100 / 10000.0 if pct else 1), 2) for rk in rks})
+        entry["ranks"] = rks
+
+    # ---- buffs and debuffs: the status entities the skill points at ----
+    view = [v for v in ints(s.get("ViewPropEntities")) if v in status_ent]
+    for vid in view:
+        row = status_ent[vid]
+        try:
+            srank = int(row.get("RankPropId") or 0)
+            sgroup = int(row.get("GroupLevelPropId") or 0)
+        except Exception:
             continue
-        sc = rank_scale.get((rankprop, rk), {})
-        # keep anything the status merge already put here
-        vals = dict(entry["qualities"].get(q, {}).get("vals", {}))
-        for key in base:
-            mult = sc.get(key)
-            eff = base[key] * (mult / 10000.0) if mult is not None else float(base[key])
-            vals[key] = round(eff, 1)
-        entry["qualities"][q] = {"rank": rk, "vals": vals}
+        rks = ranks_of(srank)
+        if not rks:
+            continue
+        curve_keys = _curve_props(sgroup)
+        for k, v in row.items():
+            if k in SKIP or not str(v).strip() or str(v).strip() == "0":
+                continue
+            try:
+                fac = int(v)
+            except Exception:
+                continue
+            prop = "ST:" + k
+            is_pct = prop_float.get(k, True)
+            if k in curve_keys:
+                _acc(entry, prop, nice(k), is_pct, True, sgroup,
+                     {rk: (levelprop.get((srank, rk), {}).get(k, 10000) / 10000.0)
+                          * (fac / 10000.0) * (0.01 if is_pct else 1) for rk in rks})
+            else:
+                _acc(entry, prop, nice(k), is_pct, False, 0,
+                     {rk: round(fac * (levelprop.get((srank, rk), {}).get(k, 10000) / 10000.0)
+                                * (100 / 10000.0 if is_pct else 1), 2) for rk in rks})
+        if entry["kind"] == "active" and not ep:
+            entry["kind"] = "buff"
+        entry["ranks"] = sorted(set(entry.get("ranks") or []) | set(rks))
+
+    # ---- flat-stat Charms: CalcSkillPassiveProps ----
+    factors = parse_factors(s.get("PassivePropFactors"))
+    if factors:
+        try:
+            p_rank = int(s.get("PassiveRankPropId") or 0)
+            p_group = int(s.get("PassiveGroupLevelPropId") or 0)
+            p_fac = int(s.get("PassiveRankFactorId") or 0)
+        except Exception:
+            p_rank = p_group = p_fac = 0
+        rks = ranks_of(p_rank)
+        curve_keys = _curve_props(p_group)
+        if not ep:
+            entry["kind"] = "passive"
+        for k, fac in factors.items():
+            # the game's chain keeps only props the level curve defines
+            if k not in curve_keys:
+                continue
+            is_pct = prop_float.get(k, False)
+            per = {}
+            for rk in rks:
+                m = (levelprop.get((p_rank, rk), {}).get(k, 10000) / 10000.0) * (fac / 10000.0)
+                if p_fac > 0:
+                    m *= levelprop.get((p_fac, rk), {}).get(k, 10000) / 10000.0
+                per[rk] = m * (0.01 if is_pct else 1)
+            _acc(entry, k, nice(k), is_pct, True, p_group, per)
+        entry["ranks"] = sorted(set(entry.get("ranks") or []) | set(rks))
+
+    rks = entry.get("ranks") or []
+    entry["ranks"] = rks
+    entry["maxRank"] = max(rks) if rks else 0
+    if not entry["labels"]:
+        entry["ranks"] = []
     return entry
 
 
@@ -402,30 +498,63 @@ def main():
             "skills": sk,
         })
 
+    curves = {}
+    for g, prop in sorted(needed_curve):
+        by = curves.setdefault(str(g), {})
+        for lv in LEVELS:
+            v = curve(g, lv).get(prop)
+            if v is not None:
+                by.setdefault(str(lv), {})[prop] = v
+
     data = {
         "qualities": QORDER,
         "qualityRanks": {q: quality_first_rank.get(q) for q in QORDER},
+        "rankLabels": {str(rk): rank_label[rk] for rk in sorted(rank_label)},
+        "rankQuality": {str(rk): rank_quality[rk] for rk in sorted(rank_quality)},
+        "levels": LEVELS,
+        "subranks": {str(cap): L(f"SubRank.{sr}") or sr for sr, cap in subrank_cap},
+        "defaultLevel": 100 if 100 in LEVELS else LEVELS[len(LEVELS) // 2],
+        "curves": curves,
         "stats": [{"key": k, "label": lb, "pct": k in PCT} for k, lb in STATS],
         "tiers": [{"tier": t, "classes": tiers[t]} for t in sorted(tiers)],
     }
     (OUT / "_skills.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
     nsk = sum(len(c["skills"]) for t in data["tiers"] for c in t["classes"])
-    withstats = sum(1 for t in data["tiers"] for c in t["classes"] for s in c["skills"] if s.get("qualities"))
-    print(f"tiers {len(data['tiers'])}, classes "
-          f"{sum(len(t['classes']) for t in data['tiers'])}, skills {nsk}, with per-quality stats {withstats}")
-    for t in data["tiers"]:
-        names = ", ".join(c["name"] for c in t["classes"])
-        print(f"  tier {t['tier']}: {names}")
-    # sample
+    withstats = sum(1 for t in data["tiers"] for c in t["classes"]
+                    for s in c["skills"] if s.get("ranks"))
+    kinds = {}
     for t in data["tiers"]:
         for c in t["classes"]:
             for s in c["skills"]:
-                if s.get("qualities"):
-                    print(f"\nsample — {c['name']} / {s['name']} (rank cap {s['maxRank']})")
-                    for q, v in s["qualities"].items():
-                        print(f"   {q:<10} rank {v['rank']:<3} {v['vals']}")
-                    return
+                kinds[s.get("type") or "?"] = kinds.get(s.get("type") or "?", 0) + 1
+    print(f"tiers {len(data['tiers'])}, classes "
+          f"{sum(len(t['classes']) for t in data['tiers'])}, skills {nsk}, "
+          f"with per-rank values {withstats}")
+    print(f"  {kinds}  ranks 1-{max(rank_label)}  levels {LEVELS[0]}-{LEVELS[-1]} "
+          f"({len(LEVELS)} steps)  curve groups {len(data['curves'])}")
+    for t in data["tiers"]:
+        print(f"  tier {t['tier']}: " + ", ".join(c["name"] for c in t["classes"]))
+
+    def show(want):
+        for t in data["tiers"]:
+            for c in t["classes"]:
+                for s in c["skills"]:
+                    if s["name"] == want:
+                        print(f"\nsample - {c['name']} / {s['name']} "
+                              f"({s['type']}, ranks {s['ranks'][:1]}..{s['ranks'][-1:]})")
+                        for rk in (s["ranks"][:1] + s["ranks"][-1:]):
+                            out = dict(s["vals"].get(str(rk), {}))
+                            for pr, m in s["lmult"].get(str(rk), {}).items():
+                                g = str(s["lgroup"][pr])
+                                base = data["curves"].get(g, {}).get("100", {}).get(pr)
+                                if base is not None:
+                                    out[pr] = round(base * m, 2)
+                            print(f"   {data['rankLabels'][str(rk)]:<14} {out}")
+                        return
+    show("Edge Strike")
+    show("Rapid Cast")
+    show("Formation Breaker")
 
 
 if __name__ == "__main__":
