@@ -61,3 +61,12 @@ Names are never hand-translated — see `build.py:L()`. Keys follow the game's o
 
 The repo is wired for Vercel via `vercel.json` at the root (`outputDirectory: web/dist`, no build
 command). Import the GitHub repo once at vercel.com and every push to the default branch deploys.
+
+## The EC prefabs
+
+`tools/06_ec_decode.py` decodes the 1,390 `*_mspack` files in `out/config_decrypted/` into
+`out/ec_decoded/*.json`. They are MessagePack-CSharp v1 with two quirks — a 2-byte opcode
+before every object, and `float` written as 4 raw bytes — so decoding is schema-driven from the
+decompiled `[Key(n)]` layouts. That is where skill element, hit lists and their coefficient
+props, `ResetCDAtStart` (Zero Initial CD), status durations, status-apply chances and
+triggers live. `skills_data.py`'s duel dataset merges those facts in as `ec`.

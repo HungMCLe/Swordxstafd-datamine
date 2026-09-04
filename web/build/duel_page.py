@@ -129,6 +129,7 @@ def render(layout, base_tables, dist: Path, out: Path):
   <button type="button" id="run" class="runbtn">Run 1,000 duels</button>
   <button type="button" id="reset" class="pickbtn">Reset to defaults</button>
   <label class="mirror"><input type="checkbox" id="mirror" checked> mirror my sheet onto the opponent</label>
+  <label class="mirror">Round cap <input type="number" id="maxrounds" value="15" min="0" max="100" style="width:4.5em"> <span class="hint">stages use 15, 20 or 30; 0 = none</span></label>
 </div>
 
 <div id="result" class="result" hidden>
@@ -136,7 +137,8 @@ def render(layout, base_tables, dist: Path, out: Path):
     <p id="oddstext"></p></div>
   <p id="charmnote" class="verdict"></p>
   <div id="hpchart"></div>
-  <h3>One representative fight</h3>
+  <h3>One fight, blow by blow</h3>
+  <p class="calcnote">A single run with a fixed seed so you can watch the turn order, cooldowns and crit/block rolls play out. The odds above come from a thousand of these.</p>
   <div class="tablewrap"><table class="log"><thead><tr>
     <th class="num">t</th><th>actor</th><th>skill</th><th class="num">damage</th>
     <th class="num">HP left</th></tr></thead><tbody id="logbody"></tbody></table></div>
@@ -157,20 +159,25 @@ def render(layout, base_tables, dist: Path, out: Path):
 </dialog>
 
 <div class="note">
-<p><b>What is exact.</b> The turn clock is <code>SpeedToTime</code>:
-<code>interval = 100000 / sqrt(SPD x rankSpeedScale)</code>, and units are drawn from a timeline in the
-order they come due, re-inserted at <code>now + interval</code> &mdash; so a unit with four times the SPD
-really does act twice as often. Damage is the whole of <code>Damage()</code>: the ATK/(ATK+DEF) term, the
-elemental numerator and denominator with their per-rank base divisors, the percentage block, and crit and
-block <i>rolled</i> per hit rather than averaged, with block cancelling crit exactly as
-<code>CalcDamageTypeImpl</code> does. Cooldowns are each skill's own <code>CD</code> at the rank you pick,
-and a skill's damage is its coefficients times ATK plus its flat term off the growth curve.</p>
-<p><b>What is modelled, not extracted.</b> Target and skill selection: the real AI lives in an ECS with
-hundreds of components and is not in the config, so here each side casts the first skill in slot order
-that is off cooldown, and falls back to a basic attack when everything is cooling. There is no grid, so
-range, area and positioning do nothing; multi-target skills hit once. Status effects, summons, shields,
-healing and passive Charms are not simulated. Level offset is off &mdash; both sides are assumed
-level-matched.</p>
+<p><b>What is exact.</b> The turn clock is <code>SpeedToTime</code>: each unit carries its own round counter
+that advances every <code>100000 / sqrt(SPD x rankSpeedScale)</code>, and whoever comes due next acts &mdash; so a
+unit with four times the SPD really does act twice as often. <b>Cooldowns count that unit's own turns</b>, not a
+shared round: <code>FightSkillAgentComponent</code> stamps <code>LastRound</code> from the caster's own
+<code>FightRoundComponent</code>. A skill with a cooldown <b>starts on cooldown</b> unless it is a
+<i>Zero Initial CD</i> skill (<code>ResetCDAtStart</code> in its prefab), which is what that keyword means.</p>
+<p><b>From the EC prefabs, not the description text:</b> each skill's element, its hit list with the coefficient
+each hit reads (Lion Combo is <code>SkillAttack1, SkillAttack1, SkillAttack2</code>; Divine Wrath rolls
+<code>SkillAttack4</code> through a random-target hit), use limits, and heals. Damage is the whole of
+<code>Damage()</code> with crit and block <i>rolled</i> per hit, block cancelling crit exactly as
+<code>CalcDamageTypeImpl</code> does.</p>
+<p><b>Decoded but not yet simulated:</b> status effects. The prefabs carry every status's duration in rounds, its
+Buff/Debuff type, the chance each hit applies it (Starlight Burst: 30% Blind), and what fires when it ends
+(Icebound heals on expiry). Those are the next thing to wire in; until then Charms that grant reflect, shields
+or status damage are reported on the page rather than counted.</p>
+<p><b>Still modelled, not extracted:</b> which skill the AI casts (slot order here; the real selector is not in
+the shared assembly &mdash; the prefabs only carry per-skill <i>target</i> priorities), and the grid, so
+range and area do nothing and multi-target skills hit once. The round cap is the stage's
+<code>MaxRound</code> and ends the fight as a draw when the slower unit has had that many turns.</p>
 <p><b>So read it as</b> a comparison of two damage-and-tempo builds under identical assumptions, which is
 what it is good for &mdash; not a prediction of a real match.</p>
 </div>
