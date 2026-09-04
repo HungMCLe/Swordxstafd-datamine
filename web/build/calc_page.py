@@ -1,113 +1,160 @@
-"""'Where your next point goes' — marginal damage per stat, from the real formula."""
+"""'Where your next point goes' — the whole damage expression, differentiated."""
 from __future__ import annotations
 import html, json
 
+BASE_COLS = ["BaseEffectDodge", "BaseEffectRate", "BaseElementMaster", "BaseElementResistance",
+             "BaseKongFuMaster", "BaseKongFuResistance", "BaseCritRatePercentValue",
+             "BaseCritAvoidPercentValue", "BaseBlockPercentValue", "BaseBlockAvoidPercentValue",
+             "BaseElementAdd", "BaseElementReduce"]
+
 
 def render(layout, base_tables, charts):
-    ladder, B, BA, BC, sr, grp, name = base_tables()
-    # everything the client needs to evaluate Damage() for a single hit
-    ranks = [{"name": r["rank"], "id": r["internal"], "cap": r["cap"],
-              "bem": r["bem"], "bea": r["bea"], "bcr": r["bcr"]} for r in ladder]
-    # BaseElementResistance / BaseElementReduce come from the same table
     import build as _b
+    ladder, _B, _BA, _BC, sr, grp, name = base_tables()
     be = _b.csvrows("level_prop_battle_extra")
     ix = {c.strip(): i for i, c in enumerate(be[0])}
-    BR, BRD = {}, {}
+    rows = {}
     for r in be[2:]:
         if len(r) > 3 and r[0].strip().isdigit():
-            BR[(int(r[0]), int(r[1]))] = int(r[ix["BaseElementResistance"]])
-            BRD[(int(r[0]), int(r[1]))] = int(r[ix["BaseElementReduce"]])
-    for r in ranks:
-        cid = grp.get(r["id"])
-        r["ber"] = BR.get((cid, r["cap"]), r["bem"])
-        r["bered"] = BRD.get((cid, r["cap"]), r["bea"])
-    cfg = json.dumps({"ranks": ranks, "minCrit": 1.3, "fixedDmgLimit": 0.9},
-                     ensure_ascii=False).replace("</", "<" + chr(92) + "/")
+            rows[(int(r[0]), int(r[1]))] = r
 
-    default_rank = next((i for i, r in enumerate(ranks) if r["name"] == "Expert III"), 8)
-    opts = "".join(
-        f'<option value="{i}"{" selected" if i == default_rank else ""}>'
-        f'{html.escape(r["name"])}</option>' for i, r in enumerate(ranks))
+    ranks = []
+    for L in ladder:
+        r = rows.get((grp.get(L["internal"]), L["cap"]))
+        if not r:
+            continue
+        entry = {"name": L["rank"], "cap": L["cap"]}
+        for c in BASE_COLS:
+            try:
+                entry[c] = int(r[ix[c]])
+            except Exception:
+                entry[c] = 1
+        ranks.append(entry)
+
+    off = _b.csvrows("fight_level_offset_damage")
+    offs = [int(r[1]) / 10000.0 for r in off[2:] if len(r) >= 2 and r[0].strip().isdigit()]
+
+    cfg = json.dumps({"ranks": ranks, "minCrit": 1.3, "minBlock": 1.5,
+                      "levelOffset": offs}, ensure_ascii=False).replace("</", "<\\/")
+    dflt = next((i for i, r in enumerate(ranks) if r["name"] == "Champion III"), len(ranks) // 2)
+    opts = lambda sel: "".join(
+        f'<option value="{i}"{" selected" if i == sel else ""}>{html.escape(r["name"])}</option>'
+        for i, r in enumerate(ranks))
+
+    def fld(id_, label, val, hint="", step="1"):
+        h = f'<span class="hint">{hint}</span>' if hint else ""
+        return (f'<label>{label}{h}<input type="number" id="{id_}" value="{val}" step="{step}"></label>')
 
     body = f"""
 <div class="wrap">
 <p class="eyebrow">Combat mechanics</p>
 <h1>Where your next point goes</h1>
-<p class="lede">Every stat feeds the same damage formula, but they enter it in different places — some
-multiply, some divide, some sit inside a sum that is already large. That decides which one is worth
-more <i>to you right now</i>. Put your numbers in and the chart ranks them.</p>
+<p class="lede">This evaluates the whole of <code>BattleFormulaHandler.Damage</code> for a sheet you type
+in, then differentiates it with respect to every stat that touches the result. It answers which stat buys
+the most damage <i>at your current numbers</i> — not in general, because there is no answer in general.</p>
 
 <div class="calc">
+  <h3 class="calchead">Your sheet</h3>
   <div class="calcgrid">
-    <label>Your ATK<input type="number" id="atk" value="97000" min="1" step="1000"></label>
-    <label>Elemental Mastery<input type="number" id="mast" value="11300" min="0" step="500"></label>
-    <label>Elemental Affinity<span class="hint">of the element you attack with</span>
-      <input type="number" id="aff" value="0" min="0" step="500"></label>
-    <label>Crit Rate <span class="hint">%, as the sheet shows it</span>
-      <input type="number" id="cr" value="63" min="0" max="100" step="1"></label>
-    <label>Crit DMG bonus <span class="hint">% above normal</span>
-      <input type="number" id="cd" value="50" min="0" step="5"></label>
-    <label>Your rank<select id="yrank">{opts}</select></label>
-    <label>Enemy rank<select id="erank">{opts}</select></label>
-    <label>Enemy DEF<input type="number" id="def" value="40000" min="0" step="1000"></label>
-    <label>Enemy Elem. RES<input type="number" id="eres" value="0" min="0" step="500"></label>
-    <label>Skill coefficient <span class="hint">%</span>
-      <input type="number" id="coef" value="204" min="1" step="10"></label>
+    {fld("atk", "ATK", 494000, "", "1000")}
+    {fld("mast", "Elemental Mastery", 86600, "", "1000")}
+    {fld("aff", "Affinity", 8040, "of the element you attack with", "500")}
+    {fld("kfm", "Physical Mastery", 15600, "used instead when the hit has no element", "500")}
+    {fld("cr", "Crit Rate", 45, "%", "1")}
+    {fld("cd", "Crit DMG", 94.3, "%", "1")}
+    {fld("boost", "DMG Boost", 30.8, "%", "1")}
+    {fld("pve", "PvE Bonus DMG", 21, "%", "1")}
+    {fld("acc", "Accuracy", 37700, "cuts the enemy's block chance", "1000")}
+    <label>Your rank<select id="yrank">{opts(dflt)}</select></label>
   </div>
-  <p class="calcnote">Defaults are a mid-game Expert III sheet. Nothing is stored or sent; the page
-  computes in your browser.</p>
+
+  <h3 class="calchead">The enemy</h3>
+  <div class="calcgrid">
+    {fld("def", "DEF", 392000, "", "1000")}
+    {fld("eres", "Elemental RES", 9380, "", "500")}
+    {fld("aegis", "Aegis", 7080, "of your attacking element", "500")}
+    {fld("critres", "Crit RES", 29.1, "%", "1")}
+    {fld("dmgres", "DMG RES", 24, "%", "1")}
+    {fld("pveres", "PvE DMG RES", 20.1, "%", "1")}
+    {fld("blockrate", "Block Rate", 11.4, "%", "1")}
+    {fld("blockeff", "Block Efficiency", 100, "%", "5")}
+    <label>Enemy rank<select id="erank">{opts(dflt)}</select></label>
+    {fld("lvlgap", "Your level minus theirs", 0, "", "1")}
+  </div>
+
+  <h3 class="calchead">The hit</h3>
+  <div class="calcgrid">
+    {fld("coef", "Skill coefficient", 204, "%", "10")}
+    {fld("flat", "Skill flat damage", 494887, "", "10000")}
+    <label>Element<select id="elem">
+      <option value="1" selected>elemental</option>
+      <option value="0">physical (no element)</option>
+    </select></label>
+  </div>
+  <p class="calcnote">Defaults are a real Champion-era sheet. Everything is computed in your browser;
+  nothing is stored or sent. Your entries stay on this device.</p>
 </div>
 
-<h2>Damage gained per +1,000 points</h2>
-<p>These four are all raw points, so they compare directly — a thousand of one against a thousand of
-another. The winner is whichever term you are furthest from saturating.</p>
-<div id="bars"></div>
+<div class="bignum"><span id="dmgout">&mdash;</span><em>expected damage per hit, averaged over crit and block</em></div>
+
+<h2>Per +1,000 points</h2>
+<p>The stats you buy in raw points. These compare directly with each other.</p>
+<div id="barsflat"></div>
+
+<h2>Per +1 percentage point</h2>
+<p>The stats printed as percentages. These compare with each other &mdash; but <b>not</b> with the chart
+above. A thousand ATK and one point of Crit DMG are not the same purchase, and until the equipment tables
+are on this site there is no honest exchange rate between them. Read each chart within itself.</p>
+<div id="barspct"></div>
 <p id="verdict" class="verdict"></p>
 
-<h2>Where the crossover is</h2>
-<p>Elemental Mastery divides by the enemy's Base Elemental Resistance and then sits inside
-<code>1 + affinity + mastery</code>. The bigger that sum grows, the less another point moves it. ATK has
-no such ceiling — it appears twice, once as the coefficient's base and once in
-<code>ATK/(ATK+DEF)</code> — so its value decays only as <code>1/ATK</code>. Somewhere the two curves
-cross.</p>
-<div id="cross"></div>
-<p id="crosstext" class="verdict"></p>
-
 <h2>Crit Rate against Crit DMG</h2>
-<p>Expected damage carries a factor of <code>1 + p x (multiplier - 1)</code>. Raising the rate is worth
-the whole crit bonus; raising the bonus is worth only the fraction of hits that crit. So rate leads while
-your crit chance is low, and they swap once it is high. The crossover is exactly where
-<code>p = 1 / (multiplier - 1)</code> in the units each is bought in.</p>
+<p>Crit DMG absolutely makes crits hit harder &mdash; it is the entire size of the bonus. The question is
+narrower: given one more percentage point, which one? Expected damage carries
+<code>1 + p x (multiplier - 1)</code>, so a point of rate is worth the whole bonus while a point of the
+bonus is worth only the fraction of hits that crit. They meet at <code>p = 1 / (multiplier - 1)</code>.
+That is a statement about equal percentage points, not about which stat matters.</p>
 <div id="critx"></div>
 <p id="crittext" class="verdict"></p>
 
+<h2>Where Mastery stops winning</h2>
+<p>Elemental Mastery divides by the enemy's Base Elemental Resistance and then sits inside
+<code>1 + affinity + mastery</code>, so it saturates. ATK appears twice &mdash; once as the coefficient's
+base, once in <code>ATK/(ATK+DEF)</code> &mdash; and decays only as <code>1/ATK</code>. They cross.</p>
+<div id="cross"></div>
+<p id="crosstext" class="verdict"></p>
+
 <div class="note">
-<p><b>What this computes.</b> One hit through <code>BattleFormulaHandler.Damage</code>, differentiated
-with respect to each stat:</p>
-<pre><code>D  =  (ATK x coef + flat) x ATK/(ATK+DEF)
-      x (1 + affinity/foeBaseElemReduce + mastery/foeBaseElemRes)
-      / (1 + foeRes/yourBaseElemMastery + ...)
-      x (1 + DmgAddPercent ...) / (1 + DmgReducePercent ...)
-      x (1 + p x (critMultiplier - 1))            <i>expected over crits</i>
-      x levelOffsetScale</code></pre>
-<p>The percentage blocks and the level offset multiply everything equally, so they cancel out of a
-comparison between stats and are left at 1 here. They change how hard you hit; they do not change
-<i>which stat to buy next</i>.</p>
-<p><b>Base Elemental Mastery and Base Elemental Resistance</b> are the hidden per-rank divisors from
-<code>level_prop_battle_extra</code>; they jump at every promotion, which is why the same Mastery number
-is worth less against a higher-ranked enemy. Crit Rate's flat form divides by
-<code>BaseCritRatePercentValue</code> the same way.</p>
-<p><b>The crit multiplier has a floor</b> of 1.3 (<code>MinCritPowerPercent</code>), so a crit always
-lands at least 30% above a normal hit however much Crit Avoid the target carries.</p>
-<p><b>What is deliberately left out:</b> block, dodge and blinding are rolls that zero or divide a hit
-rather than scale it, and the flat additive block (<code>DmgAdd</code>, <code>CritPower</code>,
-<code>BlockValue</code>) is floored at -90% of base damage. Neither changes the ranking above.</p>
+<p><b>The expression being evaluated.</b> In the order <code>Damage()</code> applies it:</p>
+<pre><code>base   = (ATK x coef + flatDamage) x ATK/(ATK+DEF)
+elem   = (1 + affinity/foeBaseElementReduce + mastery/foeBaseElementResistance)
+       / (1 + foeAegis/yourBaseElementAdd + foeElementRES/yourBaseElementMastery)
+pct    = (1 + DMGBoost + PvEBonusDMG) / (1 + foeDMGRES + foePvEDMGRES)
+p      = 0.05 + CritRate - foeCritRES              <i>crit chance</i>
+m      = max(1.3, 1 + CritDMG - foeCritRES)        <i>crit multiplier</i>
+b      = foeBlockRate - Accuracy/BaseBlockAvoid    <i>block chance</i>
+E[mult]= (1-b)((1-p) + p x m) + b / max(1.5, 1 + foeBlockEfficiency)
+D      = base x elem x pct x E[mult] x levelOffset</code></pre>
+<p><b>Block cancels crit</b> &mdash; the roll sets <code>IsCrit = false</code> whenever it blocks, so the
+two are exclusive and the expectation above is not a product of independent factors.</p>
+<p><b>Crit RES is subtracted twice:</b> once from the crit chance and again from the multiplier. A
+high-Crit-RES target both crits you less and crits you softer.</p>
+<p><b>Two floors the game enforces:</b> a crit lands at no less than <code>1.3x</code>
+(<code>MinCritPowerPercent</code>), and a block divides by no less than <code>1.5x</code>
+(<code>MinBlockValuePercent</code>).</p>
+<p><b>The level offset</b> is <code>fight_level_offset_damage</code>: 4% a level, flat at 16% from four
+levels up. Above the target you multiply by it, below you divide &mdash; so the same gap costs more than
+it pays.</p>
+<p><b>Left out on purpose:</b> the flat additive block (<code>DmgAdd</code>, <code>FixedStatusDmgAdd</code>,
+the hidden flat <code>CritPower</code>, <code>BlockValue</code>), which is floored at -90% of base damage;
+dodge and blinding, which zero a hit rather than scale it; and the profession-versus-profession scalars,
+which multiply everything equally and so cannot change the ranking.</p>
 </div>
 </div>
 <script type="application/json" id="calcdata">{cfg}</script>
 <script src="../assets/calc.js" defer></script>
 """
     return layout("Where your next point goes",
-                  "Rank ATK, Elemental Mastery, Affinity, Crit Rate and Crit DMG by how much damage each "
-                  "actually adds for your current sheet, straight from the game's damage formula.",
+                  "Evaluate the full Sword x Staff damage formula for your own stats, and see which "
+                  "stat — ATK, Elemental Mastery, Affinity, Crit Rate or Crit DMG — buys the most damage next.",
                   body, "combat", 1)

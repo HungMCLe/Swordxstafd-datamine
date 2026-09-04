@@ -15,6 +15,21 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 # ------------------------------------------------------------------ elemental
 def page_elemental(ladder):
+    # BaseElementMaster explodes with rank while BaseElementAdd barely moves, so the
+    # useful picture is their ratio: how many points of Mastery equal one of Affinity.
+    walls = charts.line_chart(
+        [{"name": "points of Mastery equal to one point of Affinity",
+          "colour": "#3d6ea8",
+          "points": [(i, r["bem"] / r["bea"]) for i, r in enumerate(ladder) if r["bea"]]}],
+        ylabel="Mastery needed to match 1 Affinity", xlabel="character rank",
+        xticks=[i for i in range(0, len(ladder), 6)],
+        xfmt=lambda v: ladder[int(round(v))]["rank"] if 0 <= int(round(v)) < len(ladder) else "",
+        yfmt=lambda v: f"{v:.0f}x",
+        marks=[{"x": 9, "label": "Champion"}],
+        caption="Affinity divides by BaseElementAdd, Mastery by BaseElementMaster. The first grows "
+                "from 1,952 to 37,128 across the whole ladder; the second from 141 to 30 million. "
+                "They are equal around Elite, and by Champion one point of Affinity is worth "
+                "thirteen of Mastery.")
     walls = charts.line_chart(
         [{"name": "Base Elemental Mastery (the divisor)", "colour": "#3d6ea8",
           "points": [(i, r["bem"]) for i, r in enumerate(ladder)]},
@@ -104,6 +119,19 @@ for how much the level gap matters. If elemental scaling ever shifts without a s
 
 # ------------------------------------------------------------------ speed
 def page_speed():
+    # only the RATIO of two SPDs matters, so plot that — absolute SPD runs into
+    # the hundreds of thousands and an absolute axis would be misleading.
+    spd = charts.line_chart(
+        [{"name": "turns you take per turn of theirs", "colour": "#3d6ea8",
+          "points": [(r / 20.0, (r / 20.0) ** 0.5) for r in range(20, 321)]},
+         {"name": "what people expect (linear)", "colour": "#9a938a", "dash": True,
+          "points": [(r / 20.0, r / 20.0) for r in range(20, 81)]}],
+        ylabel="your turns per their turn", xlabel="your SPD divided by theirs",
+        ymax=4.2, xticks=[1, 2, 4, 6, 9, 12, 16],
+        yfmt=lambda v: f"{v:.1f}x", xfmt=lambda v: f"{v:.0f}x",
+        marks=[{"x": 4, "label": "2x turns"}, {"x": 9, "label": "3x turns"}],
+        caption="Scale-free on purpose: 200 against 100 and 400,000 against 200,000 are the same "
+                "fight. Only the ratio counts, so raw SPD numbers never saturate or cap.")
     spd = charts.line_chart(
         [{"name": "turns taken, against a 100-SPD unit", "colour": "#3d6ea8",
           "points": [(x, (x / 100.0) ** 0.5) for x in range(100, 10001, 100)]},
