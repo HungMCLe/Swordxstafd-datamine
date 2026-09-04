@@ -7,6 +7,8 @@ time: `web/dist/` is committed and Vercel serves it directly.
 web/
   build/          generator (run locally, commits its output)
     build.py      layout, localisation lookup, config readers, home/method/combat pages
+    charts.py     inline-SVG line and bar charts (no library)
+    calc_page.py  'Where your next point goes' — marginal damage per stat
     site.py       entry point — remaining pages + main()
     skills_data.py    builds out/_skills.json (tier -> class -> skill, per-quality stats)
     skills_page.py    renders the skills page
@@ -17,6 +19,7 @@ web/
       icons/      113 item icons extracted from the game
       skills/     328 skill icons
       skills.js   client-side rank stepper + skill-level / character-rank controls
+      calc.js     stat calculator: differentiates the damage formula, draws its own charts
       curves.json growth curves, fetched (too big to inline)
     index.html  method.html  top-up-ladder.html  combat/*.html
 ```

@@ -149,6 +149,10 @@ inferred from testing, or translated by hand.</p>
 
 <h2>Start here</h2>
 <div class="cards">
+  <a class="card gold" href="combat/next-point.html"><span class="rail"></span>
+    <h3>Where your next point goes</h3>
+    <p>Put your sheet in and see which stat actually buys the most damage &mdash; and where
+    Elemental Mastery stops being the answer.</p></a>
   <a class="card" href="combat/damage.html"><span class="rail"></span>
     <h3>The damage formula</h3>
     <p>Every step of a single hit, in order, with a worked example using real player and monster stats.</p>
@@ -251,6 +255,11 @@ def page_combat_index():
 inside <code>Console.dll</code> that resolves every point of damage, healing and status in the game.</p>
 
 <div class="cards">
+  <a class="card gold" href="next-point.html"><span class="rail"></span>
+    <h3>Where your next point goes</h3>
+    <p>Put your own sheet in: which stat buys the most damage right now, and the exact Mastery
+    where ATK overtakes it.</p>
+    <span class="tag">Interactive</span></a>
   <a class="card" href="damage.html"><span class="rail"></span>
     <h3>The damage formula</h3>
     <p>The full pipeline in execution order, from skill coefficient to final number, with a worked example.</p>
