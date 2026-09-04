@@ -8,6 +8,7 @@ from build import (layout, write, load_tiers, base_tables, L, csvrows,
                    OUT, DIST, page_home, page_method, page_combat_index, page_damage)
 import skills_page
 import calc_page
+import duel_page
 import charts
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -436,9 +437,10 @@ def main():
     sdata = json.loads((OUT / "_skills.json").read_text(encoding="utf-8"))
     n += write("combat/next-point.html",
                calc_page.render(layout, base_tables, charts))
+    n += write("combat/duel.html", duel_page.render(layout, base_tables, DIST, OUT))
     n += write("combat/skills.html", skills_page.render(layout, sdata, iconset))
     print(f"  skills page: {sum(len(c['skills']) for t in sdata['tiers'] for c in t['classes'])} skills, {len(iconset)} icons")
-    print(f"built 11 pages, {n/1024:.0f} KB html, {len(iconmap)} icons -> {DIST}")
+    print(f"built 12 pages, {n/1024:.0f} KB html, {len(iconmap)} icons -> {DIST}")
 
 
 if __name__ == "__main__":

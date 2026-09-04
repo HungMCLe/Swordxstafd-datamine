@@ -596,6 +596,47 @@ def main():
         "stats": [{"key": k, "label": lb, "pct": k in PCT} for k, lb in STATS],
         "tiers": [{"tier": t, "classes": tiers[t]} for t in sorted(tiers)],
     }
+    # ---- compact dataset for the duel simulator -------------------------------
+    # element is not in any CSV (it lives in the binary EC prefabs), but the
+    # client's own description names it inside a colour tag; no element means
+    # Physical, which is exactly the SourceEleType == None branch in Damage().
+    import re as _re
+    ELE = ["Wind", "Water", "Fire", "Light", "Dark"]
+    _epat = _re.compile(r"<color=#[0-9a-fA-F]{3,8}>\s*(" + "|".join(ELE) + r")\s*</color>")
+    _hpat = _re.compile(r"DMG\s+(?:(\d+)\s+times|(once|twice))", _re.I)
+    duel = []
+    for t in data["tiers"]:
+        for c in t["classes"]:
+            for sk in c["skills"]:
+                if sk.get("type") != "Technique" or not sk.get("ranks"):
+                    continue
+                desc = sk.get("desc") or ""
+                m = _epat.search(desc)
+                hm = _hpat.search(_re.sub(r"<[^>]+>", "", desc))
+                hits = 1
+                if hm:
+                    hits = int(hm.group(1)) if hm.group(1) else (2 if (hm.group(2) or "").lower() == "twice" else 1)
+                per = {}
+                for rk in sk["ranks"]:
+                    v = sk["vals"].get(str(rk), {})
+                    lm = sk["lmult"].get(str(rk), {})
+                    row = {}
+                    for key in ("SkillAttack1", "SkillAttack2", "SkillAttack3", "CD"):
+                        if key in v:
+                            row[key] = v[key]
+                    if "SkillFixedAttack1" in lm:
+                        row["fx"] = lm["SkillFixedAttack1"]
+                        row["fg"] = sk["lgroup"]["SkillFixedAttack1"]
+                    if row:
+                        per[str(rk)] = row
+                duel.append({"id": sk["id"], "name": sk["name"], "cls": c["name"],
+                             "tier": t["tier"], "ele": m.group(1) if m else "Physical",
+                             "hits": max(1, min(hits, 20)), "r": per})
+    (OUT / "_duel.json").write_text(json.dumps({"skills": duel, "lpidOf": lpid_of},
+                                               ensure_ascii=False, separators=(",", ":")),
+                                    encoding="utf-8")
+    print(f"  duel dataset: {len(duel)} techniques")
+
     (OUT / "_skills.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
     nsk = sum(len(c["skills"]) for t in data["tiers"] for c in t["classes"])

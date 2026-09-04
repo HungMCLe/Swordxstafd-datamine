@@ -9,6 +9,7 @@ web/
     build.py      layout, localisation lookup, config readers, home/method/combat pages
     charts.py     inline-SVG line and bar charts (no library)
     calc_page.py  'Where your next point goes' — marginal damage per stat
+    duel_page.py  duel simulator page
     site.py       entry point — remaining pages + main()
     skills_data.py    builds out/_skills.json (tier -> class -> skill, per-quality stats)
     skills_page.py    renders the skills page
@@ -20,6 +21,8 @@ web/
       skills/     328 skill icons
       skills.js   client-side rank stepper + skill-level / character-rank controls
       calc.js     stat calculator: differentiates the damage formula, draws its own charts
+      duel.js     duel simulator: turn clock, cooldowns, Monte Carlo
+      duel.json   162 Techniques with element, hit count and per-rank coefficients
       curves.json growth curves, fetched (too big to inline)
     index.html  method.html  top-up-ladder.html  combat/*.html
 ```
