@@ -241,11 +241,35 @@ for r in table("entity_prop_status"):
 SKIP = {"EntityId", "Memo", "Memo2", "PvpPropScale", "RankPropId", "GroupLevelPropId",
         "SubRankPropId", "AffectedBySkillRank", "class_id", "level"}
 
+# prop_cfg drives the skill panel: SkillPanelShowOrder is the row order,
+# SkillHide marks a prop that is not a row of its own — the game appends it to
+# its percent partner instead, which is how "204.4%+494K" is one line.
+prop_order = {}
+prop_skillhide = {}
 prop_float = {}
 for r in table("prop_cfg"):
     pt = (r.get("PropType") or "").strip()
     if pt:
         prop_float[pt] = (r.get("Float") or "").strip().upper() == "TRUE"
+        prop_skillhide[pt] = (r.get("SkillHide") or "").strip().upper() == "TRUE"
+        try:
+            prop_order[pt] = int((r.get("SkillPanelShowOrder") or "0").strip())
+        except Exception:
+            prop_order[pt] = 0
+
+# A hidden flat prop belongs to the percent row it partners; the names carry the
+# relationship. prop_cfg's own RelativeProp column pairs character stats, not
+# these skill-panel rows, so the mapping is spelled out.
+PAIRED = {
+    "SkillAttack1": "SkillFixedAttack1", "SkillAttack2": "SkillFixedAttack2",
+    "SkillAttack3": "SkillFixedAttack3", "SkillAttack4": "SkillFixedAttack4",
+    "SkillCureByHp": "SkillFixedCure", "SkillCureByAttack": "SkillFixedCure",
+    "ShieldByAttack": "SkillFixedShield",
+    "StatusDmgReducePer": "FixedStatusDmgReduce",
+    "StatusAdd1": "StatusFixedAdd1", "StatusAdd2": "StatusFixedAdd2",
+    "StatusAdd3": "StatusFixedAdd3", "StatusAdd4": "StatusFixedAdd4",
+    "StatusShieldAddPercent": "StatusFixedShieldAdd",
+}
 
 def plain(t):
     """Game rich text -> plain text, for tooltips."""
@@ -340,14 +364,22 @@ PCT = {"SkillAttack1", "SkillAttack2", "SkillAttack3", "SkillCureByAttack",
 needed_curve = set()
 
 
-def _acc(entry, prop, label, pct, level_dep, group, per_rank):
+def _trunc(factor, mult, pct):
+    """ScaleProps casts to long at each step: (long)(value * Long2Double(scale))."""
+    v = int(factor * (mult / 10000.0))
+    return round(v / 10000.0 * 100, 4) if pct else v
+
+
+def _acc(entry, prop, label, pct, level_dep, group, per_rank, curve_key=None):
     """Record one stat: either a finished number per rank, or a per-rank
     multiplier that the page applies to the level curve."""
     entry["labels"][prop] = label
     entry["pct"][prop] = pct
     if level_dep:
+        ck = curve_key or prop
         entry["lgroup"][prop] = group
-        needed_curve.add((group, prop))
+        entry["lkey"][prop] = ck
+        needed_curve.add((group, ck))
         for rk, v in per_rank.items():
             entry["lmult"].setdefault(str(rk), {})[prop] = v
     else:
@@ -381,7 +413,7 @@ def skill_entry(cid):
         "sort": (s.get("SkillSortTypes") or "").strip(),
         "entity": eid, "kind": "active",
         "type": TYPE_EN.get(item_type.get(cid, ""), ""),
-        "vals": {}, "lmult": {}, "lgroup": {}, "labels": {}, "pct": {},
+        "vals": {}, "lmult": {}, "lgroup": {}, "lkey": {}, "labels": {}, "pct": {},
         "links": link_targets(s),
     }
 
@@ -391,34 +423,37 @@ def skill_entry(cid):
         return sorted(l for l in _lp_levels.get(rank_prop_id, []) if l in rank_quality)
 
     # ---- damage / heal / shield: entity_prop_skill ----
-    if ep:
+    def add_skill_entity(e):
         try:
-            rankprop = int(ep.get("RankPropId") or 0)
-            group = int(ep.get("GroupLevelPropId") or 0)
+            rankprop = int(e.get("RankPropId") or 0)
+            group = int(e.get("GroupLevelPropId") or 0)
         except Exception:
-            rankprop = group = 0
+            return []
         rks = ranks_of(rankprop)
         curve_keys = _curve_props(group)
         for key, label in STATS:
-            v = (ep.get(key) or "").strip()
-            if not v or v == "0":
+            label = L(f"PropType.{key}") or label
+            v = (e.get(key) or "").strip()
+            if not v or v == "0" or key in entry["labels"]:
                 continue
             try:
                 fac = int(v)
             except Exception:
                 continue
             if key in curve_keys:
-                # base comes from the character-level curve; the entity column
-                # is a factor on it, exactly as CalcSkillProps applies it
+                # the entity column is a factor on the character-level curve
                 _acc(entry, key, label, False, True, group,
                      {rk: (levelprop.get((rankprop, rk), {}).get(key, 10000) / 10000.0)
                           * (fac / 10000.0) for rk in rks})
             else:
                 pct = key in PCT
                 _acc(entry, key, label, pct, False, 0,
-                     {rk: round(fac * (levelprop.get((rankprop, rk), {}).get(key, 10000) / 10000.0)
-                                * (100 / 10000.0 if pct else 1), 2) for rk in rks})
-        entry["ranks"] = rks
+                     {rk: _trunc(fac, levelprop.get((rankprop, rk), {})
+                                       .get(key, 10000), pct) for rk in rks})
+        return rks
+
+    if ep:
+        entry["ranks"] = add_skill_entity(ep)
 
     # ---- buffs and debuffs: the status entities the skill points at ----
     view = [v for v in ints(s.get("ViewPropEntities")) if v in status_ent]
@@ -445,14 +480,22 @@ def skill_entry(cid):
             if k in curve_keys:
                 _acc(entry, prop, nice(k), is_pct, True, sgroup,
                      {rk: (levelprop.get((srank, rk), {}).get(k, 10000) / 10000.0)
-                          * (fac / 10000.0) * (0.01 if is_pct else 1) for rk in rks})
+                          * (fac / 10000.0) * (0.01 if is_pct else 1) for rk in rks},
+                     curve_key=k)
             else:
                 _acc(entry, prop, nice(k), is_pct, False, 0,
-                     {rk: round(fac * (levelprop.get((srank, rk), {}).get(k, 10000) / 10000.0)
-                                * (100 / 10000.0 if is_pct else 1), 2) for rk in rks})
+                     {rk: _trunc(fac, levelprop.get((srank, rk), {})
+                                       .get(k, 10000), is_pct) for rk in rks})
         if entry["kind"] == "active" and not ep:
             entry["kind"] = "buff"
         entry["ranks"] = sorted(set(entry.get("ranks") or []) | set(rks))
+
+    # a skill can also point at further skill entities for its side effects —
+    # Frost Guard's heal is one, and it is where "Healing Power" comes from
+    for vid in ints(s.get("ViewPropEntities")):
+        if vid in eps and vid != eid:
+            rks = add_skill_entity(eps[vid])
+            entry["ranks"] = sorted(set(entry.get("ranks") or []) | set(rks))
 
     # ---- flat-stat Charms: CalcSkillPassiveProps ----
     factors = parse_factors(s.get("PassivePropFactors"))
@@ -481,6 +524,20 @@ def skill_entry(cid):
             _acc(entry, k, nice(k), is_pct, True, p_group, per)
         entry["ranks"] = sorted(set(entry.get("ranks") or []) | set(rks))
 
+    # how the game lays the rows out: order by prop_cfg, and fold each hidden
+    # flat prop into its percent partner so one row reads "204.4% + 494K"
+    def bare(k):
+        return k[3:] if k.startswith("ST:") else k
+    entry["order"] = {k: prop_order.get(bare(k), 0) for k in entry["labels"]}
+    pair = {}
+    for k in list(entry["labels"]):
+        flat = PAIRED.get(bare(k))
+        if not flat:
+            continue
+        for cand in (flat, "ST:" + flat):
+            if cand in entry["labels"] and prop_skillhide.get(flat):
+                pair[k] = cand
+    entry["pair"] = pair
     rks = entry.get("ranks") or []
     entry["ranks"] = rks
     entry["maxRank"] = max(rks) if rks else 0
