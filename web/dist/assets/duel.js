@@ -313,12 +313,14 @@
       if (s.kind !== want) return false;
       return !q || s.name.toLowerCase().indexOf(q) >= 0 || s.cls.toLowerCase().indexOf(q) >= 0;
     }).slice(0, 200).map(function (s) {
-      return '<button type="button" class="pick" data-id="' + s.id + '">' +
+      var on = LOAD[current.side].some(function (x, k) { return x && x.id === s.id && k !== current.slot; });
+      return '<button type="button" class="pick' + (on ? " equipped" : "") + '" data-id="' + s.id + '">' +
         '<img src="../assets/skills/skill_' + s.id + '.png" alt="" width="34" height="34" loading="lazy">' +
         '<span class="pn">' + s.name + '</span>' +
         '<span class="pm">' + s.cls + ' &middot; T' + s.tier +
         (s.kind === "Technique" ? ' &middot; ' + s.ele + (s.hits > 1 ? ' &middot; ' + s.hits + ' hits' : '')
-                                 : ' &middot; Charm') + '</span></button>';
+                                 : ' &middot; Charm') +
+        (on ? ' &middot; <b>equipped &mdash; picking moves it here</b>' : '') + '</span></button>';
     }).join("");
     $("picklist").innerHTML = out || '<p class="pickempty">Nothing matches.</p>';
   }
@@ -366,8 +368,8 @@
   }
 
   Promise.all([
-    fetch("../assets/duel.json").then(function (r) { return r.json(); }),
-    fetch("../assets/curves.json").then(function (r) { return r.json(); })
+    fetch("../assets/duel.json?v=" + (C.v || "")).then(function (r) { return r.json(); }),
+    fetch("../assets/curves.json?v=" + (C.v || "")).then(function (r) { return r.json(); })
   ]).then(function (v) {
     DATA = v[0]; CURVES = v[1];
     boot();

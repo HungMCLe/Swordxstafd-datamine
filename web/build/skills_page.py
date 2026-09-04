@@ -106,13 +106,14 @@ def render(layout, data, iconset):
                 f'<div class="skillgrid">{"".join(cards)}</div></section>')
 
     maxlv = data["levels"][-1]
+    import build as _b
     from build import DIST
     (DIST / "assets").mkdir(parents=True, exist_ok=True)
     (DIST / "assets" / "curves.json").write_text(
         json.dumps(data["curves"], separators=(",", ":")), encoding="utf-8")
-    globaljson = json.dumps({k: data[k] for k in
+    globaljson = json.dumps(dict({k: data[k] for k in
                              ("rankLabels", "rankQuality", "qualityRanks",
-                              "lpidOf", "defaultLevel", "defaultSubrank")},
+                              "lpidOf", "defaultLevel", "defaultSubrank")}, v=_b.asset_v()),
                             ensure_ascii=False).replace("</", "<\/")
     subopts = "".join(
         f'<option value="{html.escape(sr["id"])}"'
@@ -183,6 +184,6 @@ game's explanation on hover — all 393 resolve, including the units named by su
 at all — their effect is described in words rather than a scaled number — and those cards say so.</p>
 </div>
 </div>
-<script src="../assets/skills.js" defer></script>
+<script src="../assets/skills.js?v={_b.asset_v()}" defer></script>
 """
     return layout("Skills", "Every Sword x Staff class skill at all 34 ranks, from Rare +0 to Immortal +10, with the values the game's own formula produces.", body, "skills", 1)

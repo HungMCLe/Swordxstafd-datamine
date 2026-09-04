@@ -52,6 +52,26 @@ NAV = [
     ("Method",          "method.html",             "method"),
 ]
 
+_ASSET_V = None
+
+
+def asset_v():
+    """Short content hash over every asset the pages load.
+
+    Browsers were serving stale JS after a deploy — a fix would ship and not
+    take effect — so each asset URL carries the hash of what is on disk."""
+    global _ASSET_V
+    if _ASSET_V is None:
+        import hashlib
+        h = hashlib.sha256()
+        for name in sorted((DIST / "assets").glob("*")):
+            if name.suffix in (".css", ".js", ".json"):
+                h.update(name.name.encode())
+                h.update(name.read_bytes())
+        _ASSET_V = h.hexdigest()[:8]
+    return _ASSET_V
+
+
 def layout(title, desc, body, active, depth=0):
     up = "../" * depth
     nav = "".join(
@@ -70,7 +90,7 @@ def layout(title, desc, body, active, depth=0):
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="{up}assets/style.css">
+<link rel="stylesheet" href="{up}assets/style.css?v={asset_v()}">
 </head>
 <body>
 <header class="masthead"><div class="masthead-in">
