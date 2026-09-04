@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SPD and turn order · Purrwikimania</title>
+<meta name="description" content="Sword x Staff runs an active-time battle; SPD buys turn frequency on a square root. The formula, the real costs, and the rank multiplier.">
+<meta property="og:title" content="SPD and turn order · Purrwikimania">
+<meta property="og:description" content="Sword x Staff runs an active-time battle; SPD buys turn frequency on a square root. The formula, the real costs, and the rank multiplier.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="masthead"><div class="masthead-in">
+  <a class="brand" href="../index.html"><span class="paw">&#128062;</span>Purrwikimania<small>Sword x Staff, datamined</small></a>
+  <nav class="top"><a href="../index.html">Home</a><a href="../combat/index.html" aria-current="page">Combat mechanics</a><a href="../combat/skills.html">Skills</a><a href="../top-up-ladder.html">Top-up ladder</a><a href="../method.html">Method</a></nav>
+</div></header>
+
+<div class="wrap">
+<p class="eyebrow">Combat mechanics</p>
+<h1>SPD and turn order</h1>
+<p class="lede">Speed is not initiative. The battle runs on a timeline, and SPD buys how often you act &mdash;
+on a square root, so it gets expensive fast.</p>
+
+<h2>The battle is a timeline</h2>
+<p>Every unit sits in a queue ordered by the moment it will next act. The engine takes whoever is earliest,
+lets them act, then re-inserts them at <code>now + their interval</code>. A faster unit's clock advances in
+smaller steps, so it keeps returning to the front.</p>
+<pre><code>interval = 100000 / sqrt(SPD x rankSpeedScale)</code></pre>
+<p>A smaller interval means acting sooner and more often. SPD is floored at 1.</p>
+
+<h2>The consequence</h2>
+<p>Because SPD sits under a square root, relative turn frequency is:</p>
+<pre><code>your actions / their actions = sqrt(your SPD / their SPD)</code></pre>
+<p><b>To act twice as often you need four times the SPD.</b></p>
+
+<div class="tablewrap"><table>
+<thead><tr><th class="num">SPD</th><th class="num">Interval</th><th>Turns vs a 100-SPD unit</th></tr></thead>
+<tbody>
+<tr><td class="num">100</td><td class="num">10,000</td><td>1&times;</td></tr>
+<tr><td class="num">400</td><td class="num">5,000</td><td>2&times;</td></tr>
+<tr><td class="num">900</td><td class="num">3,333</td><td>3&times;</td></tr>
+<tr><td class="num">1,600</td><td class="num">2,500</td><td>4&times;</td></tr>
+<tr><td class="num">10,000</td><td class="num">1,000</td><td>10&times;</td></tr>
+</tbody></table></div>
+
+<h2>What extra turns cost</h2>
+<p>Starting from 65,200 SPD, a realistic late-Expert value:</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Gain</th><th class="num">SPD needed</th><th class="num">Increase</th></tr></thead>
+<tbody>
+<tr><td>+10% actions</td><td class="num">78,892</td><td class="num">+21%</td></tr>
+<tr><td>+20% actions</td><td class="num">93,888</td><td class="num">+44%</td></tr>
+<tr><td>+50% actions</td><td class="num">146,700</td><td class="num">+125%</td></tr>
+<tr><td>+100% actions</td><td class="num">260,800</td><td class="num">+300%</td></tr>
+</tbody></table></div>
+
+<h2>The rank multiplier</h2>
+<p><code>rankSpeedScale</code> sits <i>inside</i> the square root, which makes it a large lever. It is constant
+within a rank, so it cancels out in same-rank fights and only matters across ranks.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Rank band</th><th class="num">Scale</th><th class="num">Effect on turn rate</th></tr></thead>
+<tbody>
+<tr><td>No Rank &rarr; Master</td><td class="num">1</td><td class="num">baseline</td></tr>
+<tr><td>Paragon</td><td class="num">10</td><td class="num">&times;3.16</td></tr>
+<tr><td>Saint and above</td><td class="num">150</td><td class="num">&times;12.25</td></tr>
+</tbody></table><caption>Source: <code>fight_rank_offset_damage</code>, <code>SpeedScale</code> column.</caption></div>
+
+<h2>Two things that ignore SPD entirely</h2>
+<p>Status effects can move a unit's next action time directly, bypassing the stat: a positive
+<code>RoundIntervalPercent</code> advances the turn, a negative one delays it, and <b>zero makes the unit act
+immediately</b>. Skill cooldowns are a separate flat system that SPD does not reduce.</p>
+
+<div class="note">
+<p><b>On the community formula.</b> A widely shared version writes each unit's share of total actions as
+<code>2R &times; sqrt(s) / sum(sqrt(s))</code> across both teams. That is correct &mdash; it is the fight-level
+integral of the same rule, and the ratio it produces, <code>sqrt(s/e)</code>, matches the code exactly.
+Two caveats: it omits <code>rankSpeedScale</code> (harmless within one rank), and the "2R action pool" is a
+modelling convenience rather than something the code computes.</p>
+</div>
+</div>
+
+<footer class="site"><div class="in">
+  <p><b>Purrwikimania</b> — an independent, fan-made reference for <i>Sword x Staff</i> (Boltray Games).
+  Every number here is read directly out of the game's own configuration files and decompiled code,
+  not from testing or estimation. Item names are the game's official English strings.</p>
+  <p>Not affiliated with or endorsed by Boltray Games. Game names, images and data are the property of their owners.
+  Figures reflect the client build they were extracted from and can change with any patch — see
+  <a href="../method.html">Method</a> for exactly what was read and when.</p>
+</div></footer>
+</body>
+</html>

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Home · Purrwikimania</title>
+<meta name="description" content="Datamined reference for Sword x Staff: combat formulas, stat tables and the top-up ladder, read from the game&#x27;s own config files.">
+<meta property="og:title" content="Home · Purrwikimania">
+<meta property="og:description" content="Datamined reference for Sword x Staff: combat formulas, stat tables and the top-up ladder, read from the game&#x27;s own config files.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="masthead"><div class="masthead-in">
+  <a class="brand" href="index.html"><span class="paw">&#128062;</span>Purrwikimania<small>Sword x Staff, datamined</small></a>
+  <nav class="top"><a href="index.html" aria-current="page">Home</a><a href="combat/index.html">Combat mechanics</a><a href="combat/skills.html">Skills</a><a href="top-up-ladder.html">Top-up ladder</a><a href="method.html">Method</a></nav>
+</div></header>
+
+<div class="wrap">
+<p class="eyebrow">Independent datamined reference</p>
+<h1>The numbers behind <em>Sword&nbsp;x&nbsp;Staff</em></h1>
+<p class="lede">Every figure on this site is read straight out of the game's own configuration
+tables and decompiled code — the same files the client reads at runtime. Nothing here is estimated,
+inferred from testing, or translated by hand.</p>
+
+<div class="facts">
+  <div class="fact"><b>3,249</b><span>Config tables read</span></div>
+  <div class="fact"><b>4,349</b><span>Lines of combat code</span></div>
+  <div class="fact"><b>353</b><span>Stats catalogued</span></div>
+  <div class="fact"><b>328</b><span>Class skills</span></div>
+</div>
+
+<h2>Start here</h2>
+<div class="cards">
+  <a class="card" href="combat/damage.html"><span class="rail"></span>
+    <h3>The damage formula</h3>
+    <p>Every step of a single hit, in order, with a worked example using real player and monster stats.</p>
+    <span class="tag">Combat</span></a>
+  <a class="card" href="combat/elemental.html"><span class="rail"></span>
+    <h3>Elemental Mastery</h3>
+    <p>Why your Mastery number means nothing on its own, and the hidden per-rank value it is measured against.</p>
+    <span class="tag">Combat</span></a>
+  <a class="card" href="combat/speed.html"><span class="rail"></span>
+    <h3>SPD and turn order</h3>
+    <p>Speed is not initiative — it buys turn frequency, on a square root. What that actually costs.</p>
+    <span class="tag">Combat</span></a>
+  <a class="card" href="combat/skills.html"><span class="rail"></span>
+    <h3>Skill database</h3>
+    <p>All 328 class skills across seven tiers, with a stepper that walks each one from Rare to Immortal.</p>
+    <span class="tag">Skills</span></a>
+  <a class="card gold" href="top-up-ladder.html"><span class="rail"></span>
+    <h3>Top-up ladder</h3>
+    <p>All 75 cumulative spending tiers, $5 to $150,000, with every reward and its real icon.</p>
+    <span class="tag">Economy</span></a>
+</div>
+
+<h2>Why this exists</h2>
+<p>Most guides for this game describe what a stat feels like. This one shows the line of code that uses it.
+Several mechanics turn out to work very differently from how they are usually explained — Elemental Mastery
+is scored against a hidden per-rank value rather than used raw, SPD scales on a square root so doubling your
+turns costs four times the stat, and the flat "+1K" versions of Crit and Effect stats decay hard as you rank up.</p>
+
+<div class="note">
+<p><b>Everything is dated and sourced.</b> Game balance changes with patches. Each page states which client
+build its numbers came from, and the <a href="method.html">Method</a> page documents exactly how the files
+were read, so anything here can be re-checked or challenged.</p>
+</div>
+
+<h2>Coming next</h2>
+<p>Equipment and relic sets, monster stat tables, and the drop rules behind them.</p>
+</div>
+
+<footer class="site"><div class="in">
+  <p><b>Purrwikimania</b> — an independent, fan-made reference for <i>Sword x Staff</i> (Boltray Games).
+  Every number here is read directly out of the game's own configuration files and decompiled code,
+  not from testing or estimation. Item names are the game's official English strings.</p>
+  <p>Not affiliated with or endorsed by Boltray Games. Game names, images and data are the property of their owners.
+  Figures reflect the client build they were extracted from and can change with any patch — see
+  <a href="method.html">Method</a> for exactly what was read and when.</p>
+</div></footer>
+</body>
+</html>

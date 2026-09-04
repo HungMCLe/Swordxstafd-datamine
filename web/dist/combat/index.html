@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Combat mechanics · Purrwikimania</title>
+<meta name="description" content="How Sword x Staff resolves damage: the full formula, elemental layers, speed, crit and level scaling.">
+<meta property="og:title" content="Combat mechanics · Purrwikimania">
+<meta property="og:description" content="How Sword x Staff resolves damage: the full formula, elemental layers, speed, crit and level scaling.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="masthead"><div class="masthead-in">
+  <a class="brand" href="../index.html"><span class="paw">&#128062;</span>Purrwikimania<small>Sword x Staff, datamined</small></a>
+  <nav class="top"><a href="../index.html">Home</a><a href="../combat/index.html" aria-current="page">Combat mechanics</a><a href="../combat/skills.html">Skills</a><a href="../top-up-ladder.html">Top-up ladder</a><a href="../method.html">Method</a></nav>
+</div></header>
+
+<div class="wrap">
+<p class="eyebrow">Combat mechanics</p>
+<h1>How a hit is actually calculated</h1>
+<p class="lede">All of this is read from <code>BattleFormulaHandler.cs</code>, the single 4,349-line file
+inside <code>Console.dll</code> that resolves every point of damage, healing and status in the game.</p>
+
+<div class="cards">
+  <a class="card" href="damage.html"><span class="rail"></span>
+    <h3>The damage formula</h3>
+    <p>The full pipeline in execution order, from skill coefficient to final number, with a worked example.</p>
+    <span class="tag">Start here</span></a>
+  <a class="card" href="elemental.html"><span class="rail"></span>
+    <h3>Elemental Mastery &amp; Affinity</h3>
+    <p>The two stacked elemental layers, and the hidden per-rank value they are scored against.</p>
+    <span class="tag">Includes full tables</span></a>
+  <a class="card" href="speed.html"><span class="rail"></span>
+    <h3>SPD and turn order</h3>
+    <p>The battle runs on a timeline, not fixed turns. Turn frequency scales with the square root of SPD.</p>
+    <span class="tag">Mechanic</span></a>
+  <a class="card" href="crit.html"><span class="rail"></span>
+    <h3>Crit, Block and flat "value" stats</h3>
+    <p>Why a "+1K Crit" roll is worth 15% at one rank and 1% a few ranks later.</p>
+    <span class="tag">Mechanic</span></a>
+  <a class="card" href="scaling.html"><span class="rail"></span>
+    <h3>Level and rank scaling</h3>
+    <p>Three separate systems punish punching up. What each is worth, from the real tables.</p>
+    <span class="tag">Mechanic</span></a>
+</div>
+
+<h2>The short version</h2>
+<ul>
+  <li><b>Damage is a chain of multipliers</b>, not a sum. The order matters, and a few steps are capped.</li>
+  <li><b>Armour uses <code>ATK / (ATK + DEF)</code></b> — so defence has diminishing returns, and ATK enters the
+      formula twice.</li>
+  <li><b>Several stats are never used raw.</b> Elemental Mastery, Crit value, Effect value and Block value are all
+      divided by a hidden per-rank number before use, which is why they quietly lose value as you rank up.</li>
+  <li><b>SPD buys turns on a square root.</b> Twice the turns costs four times the stat.</li>
+  <li><b>The battle is server-authoritative.</b> The client mirrors the simulation; it does not run it.</li>
+</ul>
+</div>
+
+<footer class="site"><div class="in">
+  <p><b>Purrwikimania</b> — an independent, fan-made reference for <i>Sword x Staff</i> (Boltray Games).
+  Every number here is read directly out of the game's own configuration files and decompiled code,
+  not from testing or estimation. Item names are the game's official English strings.</p>
+  <p>Not affiliated with or endorsed by Boltray Games. Game names, images and data are the property of their owners.
+  Figures reflect the client build they were extracted from and can change with any patch — see
+  <a href="../method.html">Method</a> for exactly what was read and when.</p>
+</div></footer>
+</body>
+</html>

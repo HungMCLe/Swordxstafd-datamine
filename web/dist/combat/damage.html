@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The damage formula · Purrwikimania</title>
+<meta name="description" content="Every step Sword x Staff runs to resolve one hit, in order, with a worked example from real config values.">
+<meta property="og:title" content="The damage formula · Purrwikimania">
+<meta property="og:description" content="Every step Sword x Staff runs to resolve one hit, in order, with a worked example from real config values.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="masthead"><div class="masthead-in">
+  <a class="brand" href="../index.html"><span class="paw">&#128062;</span>Purrwikimania<small>Sword x Staff, datamined</small></a>
+  <nav class="top"><a href="../index.html">Home</a><a href="../combat/index.html" aria-current="page">Combat mechanics</a><a href="../combat/skills.html">Skills</a><a href="../top-up-ladder.html">Top-up ladder</a><a href="../method.html">Method</a></nav>
+</div></header>
+
+<div class="wrap">
+<p class="eyebrow">Combat mechanics</p>
+<h1>The damage formula</h1>
+<p class="lede">Every step the game runs for one hit, in the order it runs them. Source:
+<code>BattleFormulaHandler.Damage()</code>.</p>
+
+<h2>Before anything is calculated</h2>
+<p>Three checks return zero immediately, in this order: <b>Blind</b>, <b>Dodge</b>, <b>Immunity</b>.
+A blinded attacker misses before the target's dodge is even rolled.</p>
+
+<h2>The pipeline</h2>
+<p>Everything below is applied in sequence to a single running number.</p>
+<ol>
+  <li><b>Base damage</b> = the skill's base stat &times; its coefficient. For an attack skill that is
+      your ATK &times; the skill ratio.</li>
+  <li><b>Flat skill damage</b> is added.</li>
+  <li><b>Armour mitigation</b>: &times; <code>ATK / (ATK + DEF)</code>.</li>
+  <li><b>Skill damage reduction</b> from the target, applied as a divisor.</li>
+  <li><b>Elemental layer</b> — see <a href="elemental.html">Elemental Mastery</a>.</li>
+  <li><b>Damage bonus vs resistance</b>: &times; <code>(1 + DMG Boost + PvE/PvP bonus) / (1 + their DMG RES + their reduction scales)</code>.</li>
+  <li><b>Crit</b>, if it landed, and <b>Block</b>, if it landed. They are mutually exclusive.</li>
+  <li><b>Level offset</b> and <b>rank offset</b> — see <a href="scaling.html">Level and rank scaling</a>.</li>
+  <li><b>Situational</b>: food buffs, distance bonuses, execute scaling, bonus versus large monsters.</li>
+</ol>
+
+<div class="note">
+<p><b>ATK is in the formula twice.</b> Once as the base value in step 1, and again in the mitigation term
+in step 3. That is why its value per point behaves differently from every other offensive stat — its
+effectiveness ranges from linear to quadratic depending on the target's DEF.</p>
+</div>
+
+<h2>Worked example</h2>
+<p>A single cast of <i>Water Bullet</i> (skill entity 10500, coefficient 0.8899, flat 8,899) from a
+level-83 player against a same-level standard monster. All inputs are real table values.</p>
+
+<div class="tablewrap"><table>
+<thead><tr><th>Side</th><th>Stat</th><th class="num">Value</th></tr></thead>
+<tbody>
+<tr><td>Attacker</td><td>ATK</td><td class="num">97,000</td></tr>
+<tr><td>Attacker</td><td>Elemental Mastery</td><td class="num">11,300</td></tr>
+<tr><td>Attacker</td><td>Water Affinity</td><td class="num">4,820</td></tr>
+<tr><td>Attacker</td><td>DMG Boost / PvE Bonus</td><td class="num">16.3% / 19%</td></tr>
+<tr><td>Monster</td><td>DEF</td><td class="num">31,543</td></tr>
+<tr><td>Monster</td><td>HP</td><td class="num">101,532</td></tr>
+<tr><td>Monster</td><td>Water RES / Elemental RES</td><td class="num">957 / 0</td></tr>
+</tbody></table><caption>Monster row: <code>level_prop_monster</code> class 501, level 83.</caption></div>
+
+<pre><code>1. base  = 97,000 x 0.8899                        =  86,320
+2. + flat skill damage 8,899                      =  95,219
+3. x armour  97,000/(97,000+31,543) = 0.75461     =  71,854   you keep 75.5%
+4. / target skill damage reduction (1 + 0.10)     =  65,321
+5. x elemental multiplier 2.80755                 = 183,393   &lt;- largest single step
+6. x (1+0.163+0.19) / (1+0.0405+0.05)             = 227,538
+7. level offset x1.0, rank offset x1.0            = 227,538
+                                                    -------
+   NON-CRIT HIT                                     227,538
+   CRIT  x max(1.3, 1+0.63-0.0385) = x1.5915        362,127</code></pre>
+
+<p>Against a monster with 101,532 HP that is <b>2.24&times; its health</b> — a one-shot. At an 18.3% crit
+rate the average hit is about <b>252,168</b>.</p>
+
+<h2>What the example shows</h2>
+<p><b>Step 5 does the heavy lifting.</b> The elemental multiplier alone nearly triples the hit. Of its
+numerator, roughly 70% comes from Affinity and Mastery — without them the hit would be about a third
+of the size. This particular monster has <b>zero</b> Elemental RES, which is why the multiplier is so
+generous; a boss with real resistance changes the picture substantially.</p>
+<p><b>Step 3 is the biggest loss.</b> Armour removes 24.5% flat.</p>
+<p><b>Steps 7 do nothing here</b> because attacker and target are the same level and rank. They only
+matter when punching up or down.</p>
+
+<div class="note warn">
+<p><b>Set to zero in this example:</b> profession damage scales (they depend on both classes),
+combat-rating suppression, distance bonuses and execute scaling. Each is a real multiplier in the
+chain — this example simply has none of them active.</p>
+</div>
+</div>
+
+<footer class="site"><div class="in">
+  <p><b>Purrwikimania</b> — an independent, fan-made reference for <i>Sword x Staff</i> (Boltray Games).
+  Every number here is read directly out of the game's own configuration files and decompiled code,
+  not from testing or estimation. Item names are the game's official English strings.</p>
+  <p>Not affiliated with or endorsed by Boltray Games. Game names, images and data are the property of their owners.
+  Figures reflect the client build they were extracted from and can change with any patch — see
+  <a href="../method.html">Method</a> for exactly what was read and when.</p>
+</div></footer>
+</body>
+</html>
