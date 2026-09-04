@@ -69,9 +69,10 @@ def render(layout, data, iconset):
                         if f"skill_{sid}.png" in iconset else '<span class="sk-noicon"></span>')
                 qs = s.get("qualities") or {}
                 have = [q for q in qualities if q in qs]
-                desc = richtext((s.get("desc") or "").strip())
+                desc = richtext((s.get("desc") or "").strip(), s.get("links"))
                 kind = s.get("kind", "active")
-                pill = f'<span class="sk-kind {kind}">{kind}</span>'
+                tname = s.get("type") or ("Charm" if kind == "passive" else "Technique")
+                pill = f'<span class="sk-kind {tname.lower()}">{tname}</span>'
                 if have:
                     keys = {k for q in have for k in qs[q]["vals"]}
                     labels = {}
@@ -95,7 +96,7 @@ def render(layout, data, iconset):
                     attr = f' data-skill="{payload}"'
                 else:
                     stepper = ''
-                    stats = ('<p class="sk-flat">Flat-stat passive — scales with character level, '
+                    stats = ('<p class="sk-flat">Flat-stat Charm — scales with character level, '
                              'not with quality.</p>' if kind == "passive"
                              else '<p class="sk-flat">No per-quality values in the config for this one.</p>')
                     attr = ''
@@ -145,7 +146,10 @@ its colour markup — element names in their element colour, and game keywords l
 or <span class="kw">base chance</span> highlighted. Fixed figures written into the text (chances, ranges,
 hit counts) are picked out in bold; those do not change with quality. The values that <i>do</i> change are the
 ones in the stat list, which take the colour of the quality you have selected.</p>
-<p><b>241 of 328 skills</b> have per-quality values. The rest are flat-stat passives, which the rank tables
+<p><b>Two kinds, as the game splits them:</b> 166 <b>Techniques</b> and 162 <b>Charms</b>.
+Every highlighted keyword carries the game's own explanation on hover — all 393 of them resolve, including
+the summoned units named by summon skills.</p>
+<p><b>241 of 328 skills</b> have per-quality values. The rest are flat-stat Charms, which the rank tables
 do not scale at all — they grow with character level instead. Those say so on the card.</p>
 </div>
 </div>

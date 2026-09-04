@@ -241,7 +241,8 @@ footer.site b{color:var(--ink)}
 .sk-meta{display:flex;align-items:center;gap:8px;margin-top:3px}
 .sk-kind{font-size:10px;letter-spacing:.09em;text-transform:uppercase;font-weight:600;
   padding:2px 6px;border-radius:4px;background:var(--raised);border:1px solid var(--line);color:var(--faint)}
-.sk-kind.passive{color:var(--blue);border-color:var(--blue-rail)}
+.sk-kind.charm{color:var(--blue);border-color:var(--blue-rail)}
+.sk-kind.technique{color:var(--gold);border-color:var(--gold-rail)}
 .sk-num{font-family:var(--mono);font-size:11px;color:var(--faint)}
 .sk-desc{margin:0;font-size:13.2px;color:var(--muted);max-width:none}
 .sk-flat{margin:0;font-size:12.6px;color:var(--faint);font-style:italic;max-width:none}
@@ -301,7 +302,17 @@ footer.site b{color:var(--ink)}
 
 /* ---------- skill description rich text ---------- */
 .sk-desc{line-height:1.55}
-.sk-desc .kw{color:var(--gold);font-weight:500;border-bottom:1px dotted currentColor;cursor:help}
+.sk-desc .kw{color:var(--gold);font-weight:500;border-bottom:1px dotted currentColor;cursor:help;
+  position:relative;outline:none}
+.sk-desc .kw::after{content:attr(data-tip);position:absolute;left:0;bottom:calc(100% + 8px);
+  width:max-content;max-width:290px;background:var(--ink);color:var(--ground);
+  font:400 12.4px/1.45 var(--body);padding:9px 11px;border-radius:8px;
+  box-shadow:0 6px 24px rgba(0,0,0,.28);opacity:0;visibility:hidden;
+  transform:translateY(3px);transition:opacity .12s ease,transform .12s ease;z-index:30;
+  white-space:normal;pointer-events:none}
+.sk-desc .kw:hover::after,.sk-desc .kw:focus-visible::after{opacity:1;visibility:visible;transform:translateY(0)}
+.sk-desc .kw:focus-visible{outline:2px solid var(--blue-rail);outline-offset:2px;border-radius:3px}
+@media (prefers-reduced-motion:reduce){ .sk-desc .kw::after{transition:none} }
 .sk-desc u{text-decoration:none}
 .sk-desc .dnum{font-family:var(--mono);font-size:.94em;font-weight:600;color:var(--ink)}
 .sk-desc span[style*="color"]{font-weight:500}
