@@ -7,12 +7,25 @@ from pathlib import Path
 from build import (layout, write, load_tiers, base_tables, L, csvrows,
                    OUT, DIST, page_home, page_method, page_combat_index, page_damage)
 import skills_page
+import calc_page
+import charts
 
 sys.stdout.reconfigure(encoding="utf-8")
 
 
 # ------------------------------------------------------------------ elemental
 def page_elemental(ladder):
+    walls = charts.line_chart(
+        [{"name": "Base Elemental Mastery (the divisor)", "colour": "#3d6ea8",
+          "points": [(i, r["bem"]) for i, r in enumerate(ladder)]},
+         {"name": "Base Elemental Add (Affinity divisor)", "colour": "#4e8a5c",
+          "points": [(i, r["bea"]) for i, r in enumerate(ladder)]}],
+        ylabel="divisor", xlabel="character rank",
+        xticks=[i for i in range(0, len(ladder), 6)],
+        xfmt=lambda v: ladder[int(round(v))]["rank"] if 0 <= int(round(v)) < len(ladder) else "",
+        yfmt=lambda v: f"{v/1000:.0f}K" if v >= 1000 else f"{v:.0f}",
+        caption="Both divisors climb every promotion, so the same raw Mastery is worth steadily "
+                "less. Affinity divides by the lower of the two throughout.")
     rows, prev = [], None
     for e in ladder:
         jump = f"&times;{e['bem']/prev:.2f}" if prev else "&mdash;"
@@ -60,6 +73,7 @@ beats the expected value harder than the other.</p>
 </tbody></table></div>
 
 <h2>Base Elemental Mastery by rank</h2>
+{walls}
 <p>The value at each rank's level cap. Base Elemental RES is identical at every row.</p>
 <div class="tablewrap"><table>
 <thead><tr><th>Rank</th><th class="num">Level cap</th><th class="num">Base Elemental Mastery</th><th class="num">vs previous</th></tr></thead>
@@ -90,7 +104,16 @@ for how much the level gap matters. If elemental scaling ever shifts without a s
 
 # ------------------------------------------------------------------ speed
 def page_speed():
-    body = """
+    spd = charts.line_chart(
+        [{"name": "turns taken, against a 100-SPD unit", "colour": "#3d6ea8",
+          "points": [(x, (x / 100.0) ** 0.5) for x in range(100, 10001, 100)]},
+         {"name": "if SPD were linear", "colour": "#9a938a", "dash": True,
+          "points": [(x, x / 100.0) for x in range(100, 1101, 100)]}],
+        ylabel="relative turns", xlabel="SPD", ymax=10.5,
+        yfmt=lambda v: f"{v:.0f}x", xfmt=lambda v: f"{v/1000:.0f}K" if v >= 1000 else f"{v:.0f}",
+        marks=[{"x": 400, "label": "2x"}, {"x": 1600, "label": "4x"}],
+        caption="Doubling your turn rate costs four times the SPD; tripling it costs nine times.")
+    body = f"""
 <div class="wrap">
 <p class="eyebrow">Combat mechanics</p>
 <h1>SPD and turn order</h1>
@@ -108,6 +131,7 @@ smaller steps, so it keeps returning to the front.</p>
 <p>Because SPD sits under a square root, relative turn frequency is:</p>
 <pre><code>your actions / their actions = sqrt(your SPD / their SPD)</code></pre>
 <p><b>To act twice as often you need four times the SPD.</b></p>
+{spd}
 
 <div class="tablewrap"><table>
 <thead><tr><th class="num">SPD</th><th class="num">Interval</th><th>Turns vs a 100-SPD unit</th></tr></thead>
@@ -223,7 +247,17 @@ becomes worthless entirely once effective crit chance reaches 100%.</p>
 
 # ------------------------------------------------------------------ scaling
 def page_scaling():
-    body = """
+    off = csvrows("fight_level_offset_damage")
+    pts = [(int(r[0]), int(r[1]) / 10000.0 * 100) for r in off[2:]
+           if len(r) >= 2 and r[0].strip().isdigit()][:26]
+    lvl = charts.line_chart(
+        [{"name": "damage swing from a level gap", "colour": "#b8863b", "points": pts}],
+        ylabel="damage change", xlabel="levels above (or below) the target",
+        yfmt=lambda v: f"{v:.0f}%", xfmt=lambda v: f"{v:.0f}",
+        marks=[{"x": 4, "label": "caps here"}],
+        caption="It rises 4% a level then stops dead at four levels. Above your target you multiply "
+                "by this; below it you divide by it, so the same gap hurts more than it helps.")
+    body = f"""
 <div class="wrap">
 <p class="eyebrow">Combat mechanics</p>
 <h1>Level and rank scaling</h1>
@@ -231,6 +265,7 @@ def page_scaling():
 own level. They stack, and they are not equally important.</p>
 
 <h2>1. Level offset</h2>
+{lvl}
 <p>Outside PvP, the game looks up the level gap in <code>fight_level_offset_damage</code> and applies a
 multiplier: damage is multiplied when you are higher level, divided when you are lower.</p>
 <div class="note">
@@ -371,9 +406,11 @@ def main():
             shutil.copy2(p_, skdir / p_.name)
             iconset.add(p_.name)
     sdata = json.loads((OUT / "_skills.json").read_text(encoding="utf-8"))
+    n += write("combat/next-point.html",
+               calc_page.render(layout, base_tables, charts))
     n += write("combat/skills.html", skills_page.render(layout, sdata, iconset))
     print(f"  skills page: {sum(len(c['skills']) for t in sdata['tiers'] for c in t['classes'])} skills, {len(iconset)} icons")
-    print(f"built 10 pages, {n/1024:.0f} KB html, {len(iconmap)} icons -> {DIST}")
+    print(f"built 11 pages, {n/1024:.0f} KB html, {len(iconmap)} icons -> {DIST}")
 
 
 if __name__ == "__main__":

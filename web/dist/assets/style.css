@@ -334,3 +334,31 @@ footer.site b{color:var(--ink)}
 
 /* a rank label is wider than a quality name: Immortal +10 */
 .qname{min-width:96px}
+
+/* ---------- charts ---------- */
+.chartbox{margin:22px 0 26px;padding:16px 14px 10px;background:var(--surface);
+  border:1px solid var(--line);border-radius:11px}
+.chart{display:block;width:100%;height:auto;overflow:visible}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .axis{stroke:var(--faint);stroke-width:1}
+.chart .tick{fill:var(--faint);font:400 11px var(--mono)}
+.chart .axlabel{fill:var(--muted);font:600 11px var(--body);letter-spacing:.04em}
+.chart .barlabel{fill:var(--ink);font:500 13px var(--body)}
+.chart .barval{fill:var(--muted);font:600 12px var(--mono)}
+.chart .mark{stroke:var(--faint);stroke-width:1;stroke-dasharray:3 3}
+.chart .marklabel{fill:var(--faint);font:600 10.5px var(--body);letter-spacing:.06em;text-transform:uppercase}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin:8px 2px 2px;font-size:12.5px;color:var(--muted)}
+.legend .key{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+.chartbox figcaption{margin-top:8px;font-size:12.5px;color:var(--faint)}
+
+/* ---------- stat calculator ---------- */
+.calc{margin:24px 0;padding:18px;background:var(--surface);border:1px solid var(--line);border-radius:11px}
+.calcgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:14px 18px}
+.calcgrid label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;font-weight:600;color:var(--muted)}
+.calcgrid .hint{font-weight:400;color:var(--faint);font-size:11.5px}
+.calcgrid input,.calcgrid select{font:600 14px/1 var(--mono);padding:9px 10px;border-radius:7px;
+  background:var(--raised);color:var(--ink);border:1px solid var(--line);width:100%}
+.calcnote{margin:14px 0 0;font-size:12px;color:var(--faint)}
+.verdict{margin:2px 0 26px;padding:12px 14px;background:var(--raised);border-left:3px solid var(--gold-rail);
+  border-radius:0 7px 7px 0;font-size:14.5px}

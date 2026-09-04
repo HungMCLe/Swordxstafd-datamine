@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Where your next point goes · Purrwikimania</title>
+<meta name="description" content="Rank ATK, Elemental Mastery, Affinity, Crit Rate and Crit DMG by how much damage each actually adds for your current sheet, straight from the game&#x27;s damage formula.">
+<meta property="og:title" content="Where your next point goes · Purrwikimania">
+<meta property="og:description" content="Rank ATK, Elemental Mastery, Affinity, Crit Rate and Crit DMG by how much damage each actually adds for your current sheet, straight from the game&#x27;s damage formula.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="masthead"><div class="masthead-in">
+  <a class="brand" href="../index.html"><span class="paw">&#128062;</span>Purrwikimania<small>Sword x Staff, datamined</small></a>
+  <nav class="top"><a href="../index.html">Home</a><a href="../combat/index.html" aria-current="page">Combat mechanics</a><a href="../combat/skills.html">Skills</a><a href="../top-up-ladder.html">Top-up ladder</a><a href="../method.html">Method</a></nav>
+</div></header>
+
+<div class="wrap">
+<p class="eyebrow">Combat mechanics</p>
+<h1>Where your next point goes</h1>
+<p class="lede">Every stat feeds the same damage formula, but they enter it in different places — some
+multiply, some divide, some sit inside a sum that is already large. That decides which one is worth
+more <i>to you right now</i>. Put your numbers in and the chart ranks them.</p>
+
+<div class="calc">
+  <div class="calcgrid">
+    <label>Your ATK<input type="number" id="atk" value="97000" min="1" step="1000"></label>
+    <label>Elemental Mastery<input type="number" id="mast" value="11300" min="0" step="500"></label>
+    <label>Elemental Affinity<span class="hint">of the element you attack with</span>
+      <input type="number" id="aff" value="0" min="0" step="500"></label>
+    <label>Crit Rate <span class="hint">%, as the sheet shows it</span>
+      <input type="number" id="cr" value="63" min="0" max="100" step="1"></label>
+    <label>Crit DMG bonus <span class="hint">% above normal</span>
+      <input type="number" id="cd" value="50" min="0" step="5"></label>
+    <label>Your rank<select id="yrank"><option value="0">No Rank</option><option value="1">Apprentice I</option><option value="2">Apprentice II</option><option value="3">Apprentice III</option><option value="4">Elite I</option><option value="5">Elite II</option><option value="6">Elite III</option><option value="7">Expert I</option><option value="8">Expert II</option><option value="9" selected>Expert III</option><option value="10">Champion I</option><option value="11">Champion II</option><option value="12">Champion III</option><option value="13">Master I</option><option value="14">Master II</option><option value="15">Master III</option><option value="16">Paragon I</option><option value="17">Paragon II</option><option value="18">Paragon III</option><option value="19">Saint I</option><option value="20">Saint II</option><option value="21">Saint III</option><option value="22">Ascendant I</option><option value="23">Ascendant II</option><option value="24">Ascendant III</option><option value="25">Divinity I</option><option value="26">Divinity II</option><option value="27">Divinity III</option><option value="28">Eternity I</option><option value="29">Eternity II</option><option value="30">Eternity III</option><option value="31">Genesis I</option><option value="32">Genesis II</option><option value="33">Genesis III</option><option value="34">Void I</option><option value="35">Void II</option><option value="36">Void III</option><option value="37">(unreleased)</option><option value="38">(unreleased)</option><option value="39">(unreleased)</option></select></label>
+    <label>Enemy rank<select id="erank"><option value="0">No Rank</option><option value="1">Apprentice I</option><option value="2">Apprentice II</option><option value="3">Apprentice III</option><option value="4">Elite I</option><option value="5">Elite II</option><option value="6">Elite III</option><option value="7">Expert I</option><option value="8">Expert II</option><option value="9" selected>Expert III</option><option value="10">Champion I</option><option value="11">Champion II</option><option value="12">Champion III</option><option value="13">Master I</option><option value="14">Master II</option><option value="15">Master III</option><option value="16">Paragon I</option><option value="17">Paragon II</option><option value="18">Paragon III</option><option value="19">Saint I</option><option value="20">Saint II</option><option value="21">Saint III</option><option value="22">Ascendant I</option><option value="23">Ascendant II</option><option value="24">Ascendant III</option><option value="25">Divinity I</option><option value="26">Divinity II</option><option value="27">Divinity III</option><option value="28">Eternity I</option><option value="29">Eternity II</option><option value="30">Eternity III</option><option value="31">Genesis I</option><option value="32">Genesis II</option><option value="33">Genesis III</option><option value="34">Void I</option><option value="35">Void II</option><option value="36">Void III</option><option value="37">(unreleased)</option><option value="38">(unreleased)</option><option value="39">(unreleased)</option></select></label>
+    <label>Enemy DEF<input type="number" id="def" value="40000" min="0" step="1000"></label>
+    <label>Enemy Elem. RES<input type="number" id="eres" value="0" min="0" step="500"></label>
+    <label>Skill coefficient <span class="hint">%</span>
+      <input type="number" id="coef" value="204" min="1" step="10"></label>
+  </div>
+  <p class="calcnote">Defaults are a mid-game Expert III sheet. Nothing is stored or sent; the page
+  computes in your browser.</p>
+</div>
+
+<h2>Damage gained per +1,000 points</h2>
+<p>These four are all raw points, so they compare directly — a thousand of one against a thousand of
+another. The winner is whichever term you are furthest from saturating.</p>
+<div id="bars"></div>
+<p id="verdict" class="verdict"></p>
+
+<h2>Where the crossover is</h2>
+<p>Elemental Mastery divides by the enemy's Base Elemental Resistance and then sits inside
+<code>1 + affinity + mastery</code>. The bigger that sum grows, the less another point moves it. ATK has
+no such ceiling — it appears twice, once as the coefficient's base and once in
+<code>ATK/(ATK+DEF)</code> — so its value decays only as <code>1/ATK</code>. Somewhere the two curves
+cross.</p>
+<div id="cross"></div>
+<p id="crosstext" class="verdict"></p>
+
+<h2>Crit Rate against Crit DMG</h2>
+<p>Expected damage carries a factor of <code>1 + p x (multiplier - 1)</code>. Raising the rate is worth
+the whole crit bonus; raising the bonus is worth only the fraction of hits that crit. So rate leads while
+your crit chance is low, and they swap once it is high. The crossover is exactly where
+<code>p = 1 / (multiplier - 1)</code> in the units each is bought in.</p>
+<div id="critx"></div>
+<p id="crittext" class="verdict"></p>
+
+<div class="note">
+<p><b>What this computes.</b> One hit through <code>BattleFormulaHandler.Damage</code>, differentiated
+with respect to each stat:</p>
+<pre><code>D  =  (ATK x coef + flat) x ATK/(ATK+DEF)
+      x (1 + affinity/foeBaseElemReduce + mastery/foeBaseElemRes)
+      / (1 + foeRes/yourBaseElemMastery + ...)
+      x (1 + DmgAddPercent ...) / (1 + DmgReducePercent ...)
+      x (1 + p x (critMultiplier - 1))            <i>expected over crits</i>
+      x levelOffsetScale</code></pre>
+<p>The percentage blocks and the level offset multiply everything equally, so they cancel out of a
+comparison between stats and are left at 1 here. They change how hard you hit; they do not change
+<i>which stat to buy next</i>.</p>
+<p><b>Base Elemental Mastery and Base Elemental Resistance</b> are the hidden per-rank divisors from
+<code>level_prop_battle_extra</code>; they jump at every promotion, which is why the same Mastery number
+is worth less against a higher-ranked enemy. Crit Rate's flat form divides by
+<code>BaseCritRatePercentValue</code> the same way.</p>
+<p><b>The crit multiplier has a floor</b> of 1.3 (<code>MinCritPowerPercent</code>), so a crit always
+lands at least 30% above a normal hit however much Crit Avoid the target carries.</p>
+<p><b>What is deliberately left out:</b> block, dodge and blinding are rolls that zero or divide a hit
+rather than scale it, and the flat additive block (<code>DmgAdd</code>, <code>CritPower</code>,
+<code>BlockValue</code>) is floored at -90% of base damage. Neither changes the ranking above.</p>
+</div>
+</div>
+<script type="application/json" id="calcdata">{"ranks": [{"name": "No Rank", "id": "Norank", "cap": 10, "bem": 141, "bea": 1952, "bcr": 115, "ber": 141, "bered": 1952}, {"name": "Apprentice I", "id": "Blackiron1", "cap": 20, "bem": 449, "bea": 2231, "bcr": 365, "ber": 449, "bered": 2231}, {"name": "Apprentice II", "id": "Blackiron2", "cap": 30, "bem": 776, "bea": 2509, "bcr": 631, "ber": 776, "bered": 2509}, {"name": "Apprentice III", "id": "Blackiron3", "cap": 40, "bem": 1126, "bea": 2787, "bcr": 915, "ber": 1126, "bered": 2787}, {"name": "Elite I", "id": "Bronze1", "cap": 50, "bem": 2028, "bea": 3065, "bcr": 1648, "ber": 2028, "bered": 3065}, {"name": "Elite II", "id": "Bronze2", "cap": 60, "bem": 3343, "bea": 3344, "bcr": 2716, "ber": 3343, "bered": 3344}, {"name": "Elite III", "id": "Bronze3", "cap": 70, "bem": 4007, "bea": 3622, "bcr": 3255, "ber": 4007, "bered": 3622}, {"name": "Expert I", "id": "Silver1", "cap": 80, "bem": 7813, "bea": 4417, "bcr": 6348, "ber": 7813, "bered": 4417}, {"name": "Expert II", "id": "Silver2", "cap": 90, "bem": 9419, "bea": 5204, "bcr": 7653, "ber": 9419, "bered": 5204}, {"name": "Expert III", "id": "Silver3", "cap": 100, "bem": 10987, "bea": 5992, "bcr": 8927, "ber": 10987, "bered": 5992}, {"name": "Champion I", "id": "Gold1", "cap": 110, "bem": 82698, "bea": 6693, "bcr": 69975, "ber": 82698, "bered": 6693}, {"name": "Champion II", "id": "Gold2", "cap": 120, "bem": 105649, "bea": 7677, "bcr": 89395, "ber": 105649, "bered": 7677}, {"name": "Champion III", "id": "Gold3", "cap": 130, "bem": 117047, "bea": 8661, "bcr": 99040, "ber": 117047, "bered": 8661}, {"name": "Master I", "id": "Saint1", "cap": 140, "bem": 195002, "bea": 9819, "bcr": 195002, "ber": 195002, "bered": 9819}, {"name": "Master II", "id": "Saint2", "cap": 150, "bem": 228076, "bea": 10961, "bcr": 228076, "ber": 228076, "bered": 10961}, {"name": "Master III", "id": "Saint3", "cap": 160, "bem": 285400, "bea": 12103, "bcr": 285400, "ber": 285400, "bered": 12103}, {"name": "Paragon I", "id": "Legend1", "cap": 170, "bem": 387374, "bea": 13816, "bcr": 130779, "ber": 387374, "bered": 13816}, {"name": "Paragon II", "id": "Legend2", "cap": 180, "bem": 519025, "bea": 14872, "bcr": 179734, "ber": 519025, "bered": 14872}, {"name": "Paragon III", "id": "Legend3", "cap": 190, "bem": 608229, "bea": 15927, "bcr": 204482, "ber": 608229, "bered": 15927}, {"name": "Saint I", "id": "Angel1", "cap": 200, "bem": 731069, "bea": 13048, "bcr": 346148, "ber": 731069, "bered": 13048}, {"name": "Saint II", "id": "Angel2", "cap": 210, "bem": 907871, "bea": 14252, "bcr": 430063, "ber": 907871, "bered": 14252}, {"name": "Saint III", "id": "Angel3", "cap": 220, "bem": 1045932, "bea": 15456, "bcr": 482092, "ber": 1045932, "bered": 15456}, {"name": "Ascendant I", "id": "Godtouched1_1", "cap": 230, "bem": 1588197, "bea": 16660, "bcr": 709458, "ber": 1588197, "bered": 16660}, {"name": "Ascendant II", "id": "Godtouched1_2", "cap": 240, "bem": 2085321, "bea": 17864, "bcr": 965865, "ber": 2085321, "bered": 17864}, {"name": "Ascendant III", "id": "Godtouched1_3", "cap": 250, "bem": 3018756, "bea": 19068, "bcr": 1539731, "ber": 3018756, "bered": 19068}, {"name": "Divinity I", "id": "Godtouched2_1", "cap": 260, "bem": 4523065, "bea": 20272, "bcr": 2579390, "ber": 4523065, "bered": 20272}, {"name": "Divinity II", "id": "Godtouched2_2", "cap": 270, "bem": 7067523, "bea": 21476, "bcr": 4506784, "ber": 7067523, "bered": 21476}, {"name": "Divinity III", "id": "Godtouched2_3", "cap": 280, "bem": 8400869, "bea": 22680, "bcr": 5416053, "ber": 8400869, "bered": 22680}, {"name": "Eternity I", "id": "Godtouched3_1", "cap": 290, "bem": 9807437, "bea": 23884, "bcr": 6356382, "ber": 9807437, "bered": 23884}, {"name": "Eternity II", "id": "Godtouched3_2", "cap": 300, "bem": 12067766, "bea": 25088, "bcr": 8013919, "ber": 12067766, "bered": 25088}, {"name": "Eternity III", "id": "Godtouched3_3", "cap": 310, "bem": 15315923, "bea": 26292, "bcr": 10469457, "ber": 15315923, "bered": 26292}, {"name": "Genesis I", "id": "Demigod1_1", "cap": 320, "bem": 19092829, "bea": 27496, "bcr": 13342742, "ber": 19092829, "bered": 27496}, {"name": "Genesis II", "id": "Demigod1_2", "cap": 330, "bem": 22330661, "bea": 28700, "bcr": 15735721, "ber": 22330661, "bered": 28700}, {"name": "Genesis III", "id": "Demigod1_3", "cap": 340, "bem": 23220498, "bea": 29904, "bcr": 16137484, "ber": 23220498, "bered": 29904}, {"name": "Void I", "id": "Demigod2_1", "cap": 350, "bem": 24188222, "bea": 31108, "bcr": 16539247, "ber": 24188222, "bered": 31108}, {"name": "Void II", "id": "Demigod2_2", "cap": 360, "bem": 25211326, "bea": 32312, "bcr": 16941011, "ber": 25211326, "bered": 32312}, {"name": "Void III", "id": "Demigod2_3", "cap": 370, "bem": 26296035, "bea": 33516, "bcr": 17342774, "ber": 26296035, "bered": 33516}, {"name": "(unreleased)", "id": "Demigod3_1", "cap": 380, "bem": 27501278, "bea": 34720, "bcr": 17744537, "ber": 27501278, "bered": 34720}, {"name": "(unreleased)", "id": "Demigod3_2", "cap": 390, "bem": 28789372, "bea": 35924, "bcr": 18146300, "ber": 28789372, "bered": 35924}, {"name": "(unreleased)", "id": "Demigod3_3", "cap": 400, "bem": 30169666, "bea": 37128, "bcr": 18548063, "ber": 30169666, "bered": 37128}], "minCrit": 1.3, "fixedDmgLimit": 0.9}</script>
+<script src="../assets/calc.js" defer></script>
+
+<footer class="site"><div class="in">
+  <p><b>Purrwikimania</b> — an independent, fan-made reference for <i>Sword x Staff</i> (Boltray Games).
+  Every number here is read directly out of the game's own configuration files and decompiled code,
+  not from testing or estimation. Item names are the game's official English strings.</p>
+  <p>Not affiliated with or endorsed by Boltray Games. Game names, images and data are the property of their owners.
+  Figures reflect the client build they were extracted from and can change with any patch — see
+  <a href="../method.html">Method</a> for exactly what was read and when.</p>
+</div></footer>
+</body>
+</html>
