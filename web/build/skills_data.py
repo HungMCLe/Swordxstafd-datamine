@@ -15,7 +15,10 @@ OUT = ROOT / "out"
 CFG = OUT / "config_decrypted"
 
 # ---------------- localisation ----------------
-_d = (OUT / "localization" / "text_en_US.bytes").read_bytes()
+_LOC = OUT / "localization" / "text_en_US_b88.bytes"
+if not _LOC.exists():
+    _LOC = OUT / "localization" / "text_en_US.bytes"
+_d = _LOC.read_bytes()
 _n = struct.unpack_from("<i", _d, 0)[0]
 _st = 4 + _n * 12
 _idx = {}
@@ -200,7 +203,7 @@ def skill_entry(cid):
     if not s:
         return None
     name = L(f"item_{cid}_name") or s.get("Name", "").strip() or f"Skill {cid}"
-    desc = L(f"skill_func_desc_{cid}") or ""
+    desc = L(f"item_{cid}_func_desc") or ""
     try:
         eid = int(s.get("EcEntityId") or 0)
     except Exception:

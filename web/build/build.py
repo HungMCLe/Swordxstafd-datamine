@@ -20,7 +20,10 @@ SITE = "Purrwikimania"
 TAGLINE = "Sword x Staff, datamined"
 
 # ---------------------------------------------------------------- localisation
-_d = (OUT / "localization" / "text_en_US.bytes").read_bytes()
+_LOC = OUT / "localization" / "text_en_US_b88.bytes"
+if not _LOC.exists():
+    _LOC = OUT / "localization" / "text_en_US.bytes"
+_d = _LOC.read_bytes()
 _n = struct.unpack_from("<i", _d, 0)[0]
 _start = 4 + _n * 12
 _idx = {}

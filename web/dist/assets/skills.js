@@ -33,6 +33,7 @@
         nameEl.title = "Rank " + entry.rank;
       }
       if (dl) {
+        dl.className = "sk-stats " + (QCLASS[q] || "");
         var out = "";
         Object.keys(entry.vals).forEach(function (k) {
           out += '<div class="row"><dt>' + (d.labels[k] || k) + "</dt>" +
