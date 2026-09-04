@@ -74,7 +74,8 @@ def render(layout, data, iconset):
                 if ranks:
                     payload = html.escape(json.dumps(
                         {"ranks": ranks, "vals": s["vals"], "lmult": s["lmult"],
-                         "lgroup": s["lgroup"], "labels": s["labels"], "pct": s["pct"]},
+                         "lgroup": s["lgroup"], "labels": s["labels"], "pct": s["pct"],
+                         "order": s["order"], "pair": s["pair"], "lkey": s["lkey"]},
                         ensure_ascii=False), quote=True)
                     stepper = ('<div class="qstep">'
                                '<button type="button" class="qbtn" data-dir="-1" aria-label="Lower rank">&lsaquo;</button>'
@@ -164,15 +165,21 @@ step above Divine&nbsp;+0, not a relabelling.</p>
 scales it per-property by the rank table; then by the skill's own factors; and for Charms once more by a
 rank factor. The columns in <code>entity_prop_skill</code> are factors on that curve, not amounts.</p>
 <p><b>Which tables count.</b> <code>LevelPropParser</code> reads one baked binary, and
-<code>level_prop_files</code> is the game's own list of what goes into it. That matters: <code>ElementMaster</code>
-for class 2001 lives in <code>level_prop_skill_passive_other</code>, which is <i>not</i> on the list — so the rank
-step has no multiplier for it and flat stats pass through unscaled. Checked against a live client: Rapid Cast
-at Immortal&nbsp;+1, skill level 127, character rank Expert&nbsp;III computes to <b>25,444</b>, and the game
-shows 25.4K.</p>
+<code>level_prop_files</code> is the game's own list of what goes into it &mdash; merging anything else
+gives wrong numbers, because a prop missing from the rank table passes through unscaled rather than being
+multiplied. Rows follow <code>prop_cfg</code>: <code>SkillPanelShowOrder</code> for order, and a prop marked
+<code>SkillHide</code> is folded into its percent partner, which is why damage reads as one
+<b>204.4%&nbsp;+&nbsp;494,887</b> line. Values truncate at each step the way the game's
+<code>(long)</code> casts do.</p>
+<p><b>Checked against a live client.</b> Three cards at skill level 127, character rank Expert&nbsp;II:
+Rapid Cast at Immortal&nbsp;+1 &rarr; <b>25,444</b> (game: 25.4K). Divine Wrath at Divine&nbsp;+6 &rarr;
+<b>CD 2</b> and <b>204.4% + 494,887</b> (game: 204.4%+494K). Frost Guard at Divine&nbsp;+1 &rarr;
+<b>31.2% + 34,916</b> and <b>2.7% + 75,542</b> (game: 31.2%+34.9K, 2.7%+75.5K). Eight figures, eight
+matches.</p>
 <p><b>Two kinds, as the game splits them:</b> 166 <b>Techniques</b> and 162 <b>Charms</b>.
 Descriptions are the client's own text, colour markup intact, and every highlighted keyword carries the
 game's explanation on hover — all 393 resolve, including the units named by summon skills.</p>
-<p><b>276 of 328 skills</b> have per-rank values. For the rest the config's scaling chain produces nothing
+<p><b>322 of 328 skills</b> have per-rank values. For the rest the config's scaling chain produces nothing
 at all — their effect is described in words rather than a scaled number — and those cards say so.</p>
 </div>
 </div>

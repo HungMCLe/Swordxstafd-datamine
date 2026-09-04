@@ -33,9 +33,12 @@
     var dl = el.querySelector(".sk-stats");
     var i = 0;
 
-    /* every prop this skill shows, in a stable order */
-    var props = [];
-    Object.keys(d.labels).forEach(function (k) { props.push(k); });
+    /* rows in the game's own order; a paired flat prop is not a row of its own */
+    var paired = {};
+    Object.keys(d.pair || {}).forEach(function (k) { paired[d.pair[k]] = true; });
+    var props = Object.keys(d.labels)
+      .filter(function (k) { return !paired[k]; })
+      .sort(function (a, b) { return (d.order[b] || 0) - (d.order[a] || 0); });
 
     function valueOf(prop, rank) {
       var direct = d.vals[rank];
@@ -47,8 +50,9 @@
       var curve = CURVES[lpid];
       if (!curve) return undefined;
       var row = curve[level];
-      if (!row || row[prop] === undefined) return undefined;
-      return row[prop] * mult[prop];
+      var ck = (d.lkey || {})[prop] || prop;   /* curves key on the bare prop name */
+      if (!row || row[ck] === undefined) return undefined;
+      return row[ck] * mult[prop];
     }
 
     function render() {
@@ -65,8 +69,13 @@
         props.forEach(function (p) {
           var v = valueOf(p, rank);
           if (v === undefined) return;
-          out += '<div class="row"><dt>' + d.labels[p] + "</dt><dd>" +
-                 fmt(v, d.pct[p]) + "</dd></div>";
+          var text = fmt(v, d.pct[p]);
+          var mate = (d.pair || {})[p];          /* "204.4%" + "494K" on one row */
+          if (mate) {
+            var f = valueOf(mate, rank);
+            if (f !== undefined) text += " + " + fmt(f, d.pct[mate]);
+          }
+          out += '<div class="row"><dt>' + d.labels[p] + "</dt><dd>" + text + "</dd></div>";
         });
         dl.innerHTML = out;
       }
