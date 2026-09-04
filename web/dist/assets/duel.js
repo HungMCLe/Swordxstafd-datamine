@@ -116,21 +116,37 @@
     return RANKID[displayName];
   }
 
-  /* one attack's expected components; crit/block are rolled by the caller */
+  /* one action's numbers. With EC data each hit carries its own coefficient
+     prop (SkillAttack1..4); without it, fall back to the summed coefficients. */
   function hitParts(att, def, sk) {
-    var row = sk.r[String(att.srank)] || {};
-    var coef = ((row.SkillAttack1 || 0) + (row.SkillAttack2 || 0) + (row.SkillAttack3 || 0)) / 100;
-    var flat = flatOf(sk, att.srank, att.slevel, att.rank.name);
+    var row = sk.id === 0 ? { SkillAttack1: 100 } : (sk.r[String(att.srank)] || {});
+    var ec = sk.ec || null;
     var elemental = sk.ele !== "Physical";
     var mast = elemental ? att.mast : att.kfm;
     var aff = elemental ? att.aff : 0;
     var foeMasterBase = elemental ? def.rank.BaseElementResistance : def.rank.BaseKongFuResistance;
     var myMasterBase = elemental ? att.rank.BaseElementMaster : att.rank.BaseKongFuMaster;
-    var base = (att.atk * coef + flat) * att.atk / (att.atk + def.def);
     var eNum = 1 + aff / def.rank.BaseElementReduce + mast / foeMasterBase;
     var eDen = 1 + (elemental ? def.aegis / att.rank.BaseElementAdd : 0) + def.eres / myMasterBase;
     var pct = (1 + att.boost) / Math.max(0.1, 1 + def.dmgres);
-    return { flatHit: base * (eNum / eDen) * pct, hits: sk.hits || 1 };
+    var scale = att.atk / (att.atk + def.def) * (eNum / eDen) * pct;
+    var flat = flatOf(sk, att.srank, att.slevel, att.rank.name);
+    var hits = [];
+    if (ec && ec.skillType === "Cure") {
+      return { hits: [], heal: (row.SkillCureByHp || 0) / 100 * att.hp };
+    }
+    if (ec && ec.hits && ec.hits.length && ec.hits.every(function (h) { return h.kind === "HitFixed"; })) {
+      /* one entry per hit, each with the coefficient the engine reads for it */
+      ec.hits.forEach(function (h, i) {
+        var coef = (row[h.prop] || 0) / 100;
+        hits.push((att.atk * coef + (i === 0 ? flat : 0)) * scale);
+      });
+    } else {
+      var coef = ((row.SkillAttack1 || 0) + (row.SkillAttack2 || 0) + (row.SkillAttack3 || 0) + (row.SkillAttack4 || 0)) / 100;
+      var n = sk.hits || 1, per = (att.atk * coef + flat) * scale / n;
+      for (var k = 0; k < n; k++) hits.push(per);
+    }
+    return { hits: hits, heal: 0 };
   }
 
   function critChance(att, def) { return Math.min(1, Math.max(0, 0.05 + att.cr - def.critres)); }
@@ -140,45 +156,57 @@
   }
   function blockDiv(def) { return Math.max(C.minBlock, 1 + def.blockeff); }
 
-  var BASIC = { id: 0, name: "Basic attack", ele: "Physical", hits: 1,
-                r: { "22": { SkillAttack1: 100, CD: 0 } } };
+  var BASIC = { id: 0, name: "Basic attack", ele: "Physical", hits: 1, r: {} };
 
-  function oneFight(A, B, loadA, loadB, rng, wantLog) {
-    var sides = [
-      { s: A, load: loadA.slice(0, TECH), hp: A.hp, cd: [0, 0, 0, 0], t: interval(A), name: "You" },
-      { s: B, load: loadB.slice(0, TECH), hp: B.hp, cd: [0, 0, 0, 0], t: interval(B), name: "Opponent" }
-    ];
-    var log = [], turns = 0, MAXT = 400;
+  function cdOf(sk, srank) {
+    var row = sk.r[String(srank)] || {};
+    return Math.max(0, Math.round(row.CD || 0));
+  }
+
+  function oneFight(A, B, loadA, loadB, rng, wantLog, maxRounds) {
+    function side(S, load, name) {
+      var techs = load.slice(0, TECH);
+      return {
+        s: S, load: techs, hp: S.hp, t: interval(S), name: name, turns: 0,
+        /* InitLastRound: a skill with a cooldown starts ON cooldown unless it is
+           ResetCDAtStart — the "Zero Initial CD" keyword — in which case it is ready. */
+        cd: techs.map(function (sk) { return !sk ? 0 : (sk.ec && sk.ec.resetCdAtStart ? 0 : cdOf(sk, S.srank)); }),
+        uses: techs.map(function () { return 0; })
+      };
+    }
+    var sides = [side(A, loadA, "You"), side(B, loadB, "Opponent")];
+    var log = [], turns = 0, MAXT = 600;
     while (sides[0].hp > 0 && sides[1].hp > 0 && turns < MAXT) {
-      /* identical intervals tie on every action; the engine's own tie-break is not
-         in the config, so break it fairly rather than always favouring one side */
+      if (maxRounds > 0 && Math.min(sides[0].turns, sides[1].turns) >= maxRounds) break;
       var gap = sides[0].t - sides[1].t;
       var i = Math.abs(gap) < 1e-9 ? (rng() < 0.5 ? 0 : 1) : (gap < 0 ? 0 : 1);
       var me = sides[i], foe = sides[1 - i];
-      turns++;
+      turns++; me.turns++;
       for (var c = 0; c < me.cd.length; c++) if (me.cd[c] > 0) me.cd[c]--;
       var pick = null, slot = -1;
       for (var k = 0; k < me.load.length; k++) {
-        if (me.load[k] && me.cd[k] === 0) { pick = me.load[k]; slot = k; break; }
+        var cand = me.load[k];
+        if (!cand || me.cd[k] !== 0) continue;
+        var lim = cand.ec ? cand.ec.limitedTimes : -1;
+        if (lim > 0 && me.uses[k] >= lim) continue;
+        pick = cand; slot = k; break;
       }
       if (!pick) pick = BASIC;
       var parts = hitParts(me.s, foe.s, pick);
       var p = critChance(me.s, foe.s), m = critMult(me.s, foe.s);
       var b = blockChance(me.s, foe.s), bd = blockDiv(foe.s);
       var total = 0;
-      for (var h = 0; h < parts.hits; h++) {
-        var d = parts.flatHit / parts.hits;
+      parts.hits.forEach(function (d) {
         if (rng() < b) d /= bd;                 /* block cancels crit */
         else if (rng() < p) d *= m;
         total += d;
-      }
+      });
       foe.hp -= total;
-      if (slot >= 0) {
-        var row = pick.r[String(me.s.srank)] || {};
-        me.cd[slot] = Math.max(0, Math.round(row.CD || 0));
-      }
-      if (wantLog && log.length < 40) {
-        log.push({ t: Math.round(me.t), who: me.name, skill: pick.name,
+      if (parts.heal) me.hp = Math.min(me.s.hp, me.hp + parts.heal);
+      if (slot >= 0) { me.cd[slot] = cdOf(pick, me.s.srank); me.uses[slot]++; }
+      if (wantLog && log.length < 60) {
+        log.push({ t: Math.round(me.t), who: me.name,
+                   skill: pick.name + (parts.heal ? " (heals " + fmt(parts.heal) + ")" : ""),
                    dmg: total, left: Math.max(0, foe.hp) });
       }
       me.t += interval(me.s);
@@ -208,12 +236,13 @@
     if ($("mirror").checked) { B = JSON.parse(JSON.stringify(A)); B.rank = A.rank; }
     var loadA = LOAD.a, loadB = $("mirror").checked ? LOAD.a.slice() : LOAD.b;
     var N = 1000, winA = 0, draws = 0, turnList = [], rng = mulberry(12345);
+    var maxR = parseInt(($("maxrounds") || {}).value, 10) || 0;
     for (var i = 0; i < N; i++) {
-      var r = oneFight(A, B, loadA, loadB, rng, false);
+      var r = oneFight(A, B, loadA, loadB, rng, false, maxR);
       if (r.winner === 0) winA++; else if (r.winner < 0) draws++;
       turnList.push(r.turns);
     }
-    var sample = oneFight(A, B, loadA, loadB, mulberry(999), true);
+    var sample = oneFight(A, B, loadA, loadB, mulberry(999), true, maxR);
     turnList.sort(function (x, y) { return x - y; });
     var med = turnList[Math.floor(turnList.length / 2)];
     var pa = winA / N, pb = (N - winA - draws) / N;
@@ -223,7 +252,7 @@
     $("oddsa").textContent = pa >= 0.08 ? "You " + (pa * 100).toFixed(0) + "%" : "";
     $("oddsb").textContent = pb >= 0.08 ? (pb * 100).toFixed(0) + "% Opponent" : "";
     $("oddstext").innerHTML = "<b>You win " + (pa * 100).toFixed(1) + "%</b> of 1,000 duels" +
-      (draws ? ", " + (draws / N * 100).toFixed(1) + "% went the distance without a kill" : "") +
+      (draws ? ", " + (draws / N * 100).toFixed(1) + "% hit the round cap with both alive" : "") +
       ". Median fight length <b>" + med + " turns</b>. Your interval is <b>" +
       Math.round(interval(A)) + "</b> against theirs of <b>" + Math.round(interval(B)) +
       "</b>, so you act " + (interval(B) / interval(A)).toFixed(2) + "x as often.";
