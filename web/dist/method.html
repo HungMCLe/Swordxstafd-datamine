@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Method · Purrwikimania</title>
+<meta name="description" content="How the Sword x Staff data on this site was extracted: sources, builds, decompilation and exact name lookups.">
+<meta property="og:title" content="Method · Purrwikimania">
+<meta property="og:description" content="How the Sword x Staff data on this site was extracted: sources, builds, decompilation and exact name lookups.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="masthead"><div class="masthead-in">
+  <a class="brand" href="index.html"><span class="paw">&#128062;</span>Purrwikimania<small>Sword x Staff, datamined</small></a>
+  <nav class="top"><a href="index.html">Home</a><a href="combat/index.html">Combat mechanics</a><a href="top-up-ladder.html">Top-up ladder</a><a href="method.html" aria-current="page">Method</a></nav>
+</div></header>
+
+<div class="wrap narrow">
+<p class="eyebrow">Method</p>
+<h1>How these numbers were obtained</h1>
+<p class="lede">So that anything on this site can be checked, challenged, or reproduced.</p>
+
+<h2>Sources</h2>
+<p>Two, and pages say which they used:</p>
+<ul>
+  <li><b>Client build 1.0.0 (155652)</b> — the shipped Android package. Holds the code and the base config tables.</li>
+  <li><b>Client build 88_156110</b> — a live install's downloaded cache. Newer, and the source for assets and
+      tables the package does not contain.</li>
+</ul>
+<p>The package only carries about a quarter of the game's assets; the rest download on first launch.
+Anything version-sensitive is taken from the newer build.</p>
+
+<h2>Reading the code</h2>
+<p>The game is Unity IL2CPP, but the gameplay logic is not compiled into the binary — it ships as
+HybridCLR hot-update assemblies, ordinary .NET DLLs stored as text assets. Decompiling those gives readable
+C#. All combat maths on this site comes from one file, <code>BattleFormulaHandler.cs</code> (4,349 lines),
+inside <code>Console.dll</code>.</p>
+
+<h2>Reading the tables</h2>
+<p>Balance data lives in config bundles that are obfuscated with a single-byte XOR (<code>0x40</code>).
+Undoing that yields 3,249 plain CSV tables — level curves, monster stats, drop rules, the reward ladders.
+Column headers are English; a second header row carries the designers' own Chinese comments, which is often
+the clearest statement of what a column means.</p>
+
+<h2>Names</h2>
+<p>Item and stat names are <b>not</b> translated here. The game's English localisation is a binary keyed by
+a 64-bit hash of each string's key, so names are looked up exactly as the game would:</p>
+<pre><code>key   = "item_{id}_name"
+hash  = XXHash64(key, seed = 0)
+value = lookup(hash)</code></pre>
+<p>This matters. Hand-translating the Chinese config names produces wrong results — what reads literally as
+"Star Wish" is <b>Stellatie</b> in game, and the currency that looks like "Goddess Card" is an
+<b>Auroral Badge</b>.</p>
+
+<h2>What this site will not do</h2>
+<p>No account data, no server interaction, no modification of the game, and no tooling for cheating.
+This is a read-only reference built from files a normal install already has.</p>
+
+<div class="note warn">
+<p><b>Corrections welcome.</b> If a number here disagrees with what you see in game, the number here is
+probably from a different build — or simply wrong. Both are worth reporting.</p>
+</div>
+</div>
+
+<footer class="site"><div class="in">
+  <p><b>Purrwikimania</b> — an independent, fan-made reference for <i>Sword x Staff</i> (Boltray Games).
+  Every number here is read directly out of the game's own configuration files and decompiled code,
+  not from testing or estimation. Item names are the game's official English strings.</p>
+  <p>Not affiliated with or endorsed by Boltray Games. Game names, images and data are the property of their owners.
+  Figures reflect the client build they were extracted from and can change with any patch — see
+  <a href="method.html">Method</a> for exactly what was read and when.</p>
+</div></footer>
+</body>
+</html>

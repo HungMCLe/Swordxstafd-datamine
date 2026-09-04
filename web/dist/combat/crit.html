@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Crit and flat value stats · Purrwikimania</title>
+<meta name="description" content="How Sword x Staff resolves crit, and why flat +1K Crit rolls lose most of their value as you rank up.">
+<meta property="og:title" content="Crit and flat value stats · Purrwikimania">
+<meta property="og:description" content="How Sword x Staff resolves crit, and why flat +1K Crit rolls lose most of their value as you rank up.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="masthead"><div class="masthead-in">
+  <a class="brand" href="../index.html"><span class="paw">&#128062;</span>Purrwikimania<small>Sword x Staff, datamined</small></a>
+  <nav class="top"><a href="../index.html">Home</a><a href="../combat/index.html" aria-current="page">Combat mechanics</a><a href="../top-up-ladder.html">Top-up ladder</a><a href="../method.html">Method</a></nav>
+</div></header>
+
+<div class="wrap">
+<p class="eyebrow">Combat mechanics</p>
+<h1>Crit, Block and the flat "value" stats</h1>
+<p class="lede">Several stats come in two forms &mdash; a percentage and a flat "K" value. They are not
+interchangeable. The flat version is divided by a hidden per-rank number, and loses most of its worth
+as you climb.</p>
+
+<h2>The crit roll</h2>
+<pre><code>critChance = 0.05
+           + ( CritRate%      + CritRateValue      / BaseCritRateValue )
+           - ( theirCritAvoid% + theirCritAvoidValue / theirBaseCritAvoidValue )</code></pre>
+<p>Everyone has a hidden <b>5% base crit</b>. Your percentage stat adds directly. Your flat value is divided
+by a per-rank base first &mdash; the same normalisation Elemental Mastery uses.</p>
+<p>Crit damage is <code>max(MinCritPower, 1 + CritDMG% &minus; theirCritAvoid%)</code>, with the floor set to
+1.3 in <code>game_settings</code>. <b>Crit and Block are mutually exclusive</b>: a blocked hit cannot crit.</p>
+
+<h2>What "+1K Crit" is really worth</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>Rank</th><th class="num">Level cap</th><th class="num">Base Crit Value</th><th class="num">+1,000 gives</th></tr></thead>
+<tbody>
+<tr><td>No Rank</td><td class="num">10</td><td class="num">115</td><td class="num">+869.57%</td></tr>
+<tr><td>Apprentice I</td><td class="num">20</td><td class="num">365</td><td class="num">+273.97%</td></tr>
+<tr><td>Apprentice II</td><td class="num">30</td><td class="num">631</td><td class="num">+158.48%</td></tr>
+<tr><td>Apprentice III</td><td class="num">40</td><td class="num">915</td><td class="num">+109.29%</td></tr>
+<tr><td>Elite I</td><td class="num">50</td><td class="num">1,648</td><td class="num">+60.68%</td></tr>
+<tr><td>Elite II</td><td class="num">60</td><td class="num">2,716</td><td class="num">+36.82%</td></tr>
+<tr><td>Elite III</td><td class="num">70</td><td class="num">3,255</td><td class="num">+30.72%</td></tr>
+<tr><td>Expert I</td><td class="num">80</td><td class="num">6,348</td><td class="num">+15.75%</td></tr>
+<tr><td>Expert II</td><td class="num">90</td><td class="num">7,653</td><td class="num">+13.07%</td></tr>
+<tr><td>Expert III</td><td class="num">100</td><td class="num">8,927</td><td class="num">+11.20%</td></tr>
+<tr class="hi"><td>Champion I</td><td class="num">110</td><td class="num">69,975</td><td class="num">+1.43%</td></tr>
+<tr><td>Champion II</td><td class="num">120</td><td class="num">89,395</td><td class="num">+1.12%</td></tr>
+<tr><td>Champion III</td><td class="num">130</td><td class="num">99,040</td><td class="num">+1.01%</td></tr>
+<tr><td>Master I</td><td class="num">140</td><td class="num">195,002</td><td class="num">+0.51%</td></tr>
+<tr><td>Master II</td><td class="num">150</td><td class="num">228,076</td><td class="num">+0.44%</td></tr>
+<tr><td>Master III</td><td class="num">160</td><td class="num">285,400</td><td class="num">+0.35%</td></tr>
+<tr><td>Paragon I</td><td class="num">170</td><td class="num">130,779</td><td class="num">+0.76%</td></tr>
+<tr><td>Paragon II</td><td class="num">180</td><td class="num">179,734</td><td class="num">+0.56%</td></tr>
+<tr><td>Paragon III</td><td class="num">190</td><td class="num">204,482</td><td class="num">+0.49%</td></tr>
+<tr><td>Saint I</td><td class="num">200</td><td class="num">346,148</td><td class="num">+0.29%</td></tr>
+<tr><td>Saint II</td><td class="num">210</td><td class="num">430,063</td><td class="num">+0.23%</td></tr>
+<tr><td>Saint III</td><td class="num">220</td><td class="num">482,092</td><td class="num">+0.21%</td></tr>
+<tr><td>Ascendant I</td><td class="num">230</td><td class="num">709,458</td><td class="num">+0.14%</td></tr>
+<tr><td>Ascendant II</td><td class="num">240</td><td class="num">965,865</td><td class="num">+0.10%</td></tr>
+<tr><td>Ascendant III</td><td class="num">250</td><td class="num">1,539,731</td><td class="num">+0.06%</td></tr>
+<tr><td>Divinity I</td><td class="num">260</td><td class="num">2,579,390</td><td class="num">+0.04%</td></tr>
+<tr><td>Divinity II</td><td class="num">270</td><td class="num">4,506,784</td><td class="num">+0.02%</td></tr>
+<tr><td>Divinity III</td><td class="num">280</td><td class="num">5,416,053</td><td class="num">+0.02%</td></tr>
+<tr><td>Eternity I</td><td class="num">290</td><td class="num">6,356,382</td><td class="num">+0.02%</td></tr>
+<tr><td>Eternity II</td><td class="num">300</td><td class="num">8,013,919</td><td class="num">+0.01%</td></tr>
+<tr><td>Eternity III</td><td class="num">310</td><td class="num">10,469,457</td><td class="num">+0.01%</td></tr>
+<tr><td>Genesis I</td><td class="num">320</td><td class="num">13,342,742</td><td class="num">+0.01%</td></tr>
+<tr><td>Genesis II</td><td class="num">330</td><td class="num">15,735,721</td><td class="num">+0.01%</td></tr>
+<tr><td>Genesis III</td><td class="num">340</td><td class="num">16,137,484</td><td class="num">+0.01%</td></tr>
+<tr><td>Void I</td><td class="num">350</td><td class="num">16,539,247</td><td class="num">+0.01%</td></tr>
+<tr><td>Void II</td><td class="num">360</td><td class="num">16,941,011</td><td class="num">+0.01%</td></tr>
+<tr><td>Void III</td><td class="num">370</td><td class="num">17,342,774</td><td class="num">+0.01%</td></tr>
+<tr><td>(unreleased)</td><td class="num">380</td><td class="num">17,744,537</td><td class="num">+0.01%</td></tr>
+<tr><td>(unreleased)</td><td class="num">390</td><td class="num">18,146,300</td><td class="num">+0.01%</td></tr>
+<tr><td>(unreleased)</td><td class="num">400</td><td class="num">18,548,063</td><td class="num">+0.01%</td></tr>
+</tbody></table><caption>Source: <code>level_prop_battle_extra</code>, <code>BaseCritRatePercentValue</code>.</caption></div>
+
+<div class="note warn">
+<p><b>The same roll is worth +11.20% at Expert III and +1.43% at Champion I.</b> The base value jumps from
+8,927 to 69,975 across that one promotion &mdash; so flat crit is the strongest stat in the game right before
+that wall, and close to worthless after it. Percentage crit does not decay.</p>
+</div>
+
+<h2>Percentage points are not damage</h2>
+<p>Crit rate only pays out through crit damage. Expected damage is
+<code>1 + critChance &times; (critMult &minus; 1)</code>, so with a 1.59&times; multiplier, +11% crit rate is about
+<b>+6% damage</b> &mdash; real, but far less than the headline suggests.</p>
+<p>The two stats gate each other. <b>Crit Rate is the better buy while <code>CritDMG% &gt; 5% + CritRate%</code></b>;
+past that point Crit DMG takes over. They are balanced when the two numbers are roughly equal, and crit rate
+becomes worthless entirely once effective crit chance reaches 100%.</p>
+
+<h2>The same pattern elsewhere</h2>
+<p>Every stat below uses an identical <code>value / base</code> normalisation, with the base growing each rank:</p>
+<ul>
+  <li><b>Effect Hit Rate</b> and <b>Effect RES</b> &mdash; via <code>BaseEffectRate</code> / <code>BaseEffectDodge</code>.</li>
+  <li><b>Block</b> &mdash; via <code>BaseBlockPercentValue</code>.</li>
+  <li><b>Accuracy</b> &mdash; internally <code>BaseBlockAvoidPercentValue</code>, literally "base accuracy value".
+      It is the counter to enemy Block, not a hit-chance stat.</li>
+</ul>
+<p>At level 83 the Effect base is 6,049, so an Effect Hit Rate of 2.73K is contributing about
+<b>45%</b> effect chance.</p>
+</div>
+
+<footer class="site"><div class="in">
+  <p><b>Purrwikimania</b> — an independent, fan-made reference for <i>Sword x Staff</i> (Boltray Games).
+  Every number here is read directly out of the game's own configuration files and decompiled code,
+  not from testing or estimation. Item names are the game's official English strings.</p>
+  <p>Not affiliated with or endorsed by Boltray Games. Game names, images and data are the property of their owners.
+  Figures reflect the client build they were extracted from and can change with any patch — see
+  <a href="../method.html">Method</a> for exactly what was read and when.</p>
+</div></footer>
+</body>
+</html>

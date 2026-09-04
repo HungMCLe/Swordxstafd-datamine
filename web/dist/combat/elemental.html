@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Elemental Mastery · Purrwikimania</title>
+<meta name="description" content="How Sword x Staff scores Elemental Mastery against a hidden per-rank value, with the full base table for every rank.">
+<meta property="og:title" content="Elemental Mastery · Purrwikimania">
+<meta property="og:description" content="How Sword x Staff scores Elemental Mastery against a hidden per-rank value, with the full base table for every rank.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="masthead"><div class="masthead-in">
+  <a class="brand" href="../index.html"><span class="paw">&#128062;</span>Purrwikimania<small>Sword x Staff, datamined</small></a>
+  <nav class="top"><a href="../index.html">Home</a><a href="../combat/index.html" aria-current="page">Combat mechanics</a><a href="../top-up-ladder.html">Top-up ladder</a><a href="../method.html">Method</a></nav>
+</div></header>
+
+<div class="wrap">
+<p class="eyebrow">Combat mechanics</p>
+<h1>Elemental Mastery &amp; Affinity</h1>
+<p class="lede">Your Elemental Mastery number is never used raw. The game divides it by a hidden value
+that grows every rank &mdash; which is why the same gear feels strong at the end of a rank and weak at the
+start of the next.</p>
+
+<h2>The formula</h2>
+<p>Elemental damage is multiplied by a ratio: your offence over their defence.</p>
+<pre><code>            1 + (YourXAffinity / TheirBaseElemAdd) + (YourElemMastery / TheirBaseElemMastery)
+ElemMult = ---------------------------------------------------------------------------------
+            1 + (TheirXRES     / YourBaseElemAdd)  + (TheirElemRES    / YourBaseElemMastery)</code></pre>
+<p>where <code>X</code> is the attack's element. Two layers stack: a <b>per-element Affinity</b> and a
+<b>general Mastery</b>. Physical hits use Physical Mastery and Physical RES through the identical structure.</p>
+
+<h2>What "Base Elemental Mastery" is</h2>
+<p>It is a stat, but you never see it &mdash; the game's own config marks it <code>Catalog = Hide</code>.
+It is a per-rank, per-level constant: the expected value for a character at that point in the game.
+Your actual Mastery is scored against it.</p>
+<div class="note">
+<p><b>Because it appears on both sides, equal level plus equal investment is exactly neutral.</b>
+Across all 1,710 rows of the table, Base Mastery and Base RES are always identical, so two evenly matched
+characters produce a multiplier of exactly <code>&times;1.000</code>. Advantage only appears when one side
+beats the expected value harder than the other.</p>
+</div>
+
+<h2>Worked at one rank</h2>
+<p>At Expert III (level 100) the base value is 10,987:</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Situation</th><th class="num">Your Mastery</th><th class="num">Their RES</th><th class="num">Multiplier</th></tr></thead>
+<tbody>
+<tr><td>Both at the expected value</td><td class="num">10,987</td><td class="num">10,987</td><td class="num">&times;1.00</td></tr>
+<tr><td>You triple it, they don't</td><td class="num">33,000</td><td class="num">10,987</td><td class="num">&times;2.00</td></tr>
+<tr><td>Both triple it</td><td class="num">33,000</td><td class="num">33,000</td><td class="num">&times;1.00</td></tr>
+<tr><td>They triple it, you don't</td><td class="num">10,987</td><td class="num">33,000</td><td class="num">&times;0.50</td></tr>
+</tbody></table></div>
+
+<h2>Base Elemental Mastery by rank</h2>
+<p>The value at each rank's level cap. Base Elemental RES is identical at every row.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Rank</th><th class="num">Level cap</th><th class="num">Base Elemental Mastery</th><th class="num">vs previous</th></tr></thead>
+<tbody>
+<tr><td>No Rank</td><td class="num">10</td><td class="num">141</td><td class="num">&mdash;</td></tr>
+<tr><td>Apprentice I</td><td class="num">20</td><td class="num">449</td><td class="num">&times;3.18</td></tr>
+<tr><td>Apprentice II</td><td class="num">30</td><td class="num">776</td><td class="num">&times;1.73</td></tr>
+<tr><td>Apprentice III</td><td class="num">40</td><td class="num">1,126</td><td class="num">&times;1.45</td></tr>
+<tr><td>Elite I</td><td class="num">50</td><td class="num">2,028</td><td class="num">&times;1.80</td></tr>
+<tr><td>Elite II</td><td class="num">60</td><td class="num">3,343</td><td class="num">&times;1.65</td></tr>
+<tr><td>Elite III</td><td class="num">70</td><td class="num">4,007</td><td class="num">&times;1.20</td></tr>
+<tr><td>Expert I</td><td class="num">80</td><td class="num">7,813</td><td class="num">&times;1.95</td></tr>
+<tr><td>Expert II</td><td class="num">90</td><td class="num">9,419</td><td class="num">&times;1.21</td></tr>
+<tr><td>Expert III</td><td class="num">100</td><td class="num">10,987</td><td class="num">&times;1.17</td></tr>
+<tr class="hi"><td>Champion I</td><td class="num">110</td><td class="num">82,698</td><td class="num">&times;7.53</td></tr>
+<tr><td>Champion II</td><td class="num">120</td><td class="num">105,649</td><td class="num">&times;1.28</td></tr>
+<tr><td>Champion III</td><td class="num">130</td><td class="num">117,047</td><td class="num">&times;1.11</td></tr>
+<tr><td>Master I</td><td class="num">140</td><td class="num">195,002</td><td class="num">&times;1.67</td></tr>
+<tr><td>Master II</td><td class="num">150</td><td class="num">228,076</td><td class="num">&times;1.17</td></tr>
+<tr><td>Master III</td><td class="num">160</td><td class="num">285,400</td><td class="num">&times;1.25</td></tr>
+<tr><td>Paragon I</td><td class="num">170</td><td class="num">387,374</td><td class="num">&times;1.36</td></tr>
+<tr><td>Paragon II</td><td class="num">180</td><td class="num">519,025</td><td class="num">&times;1.34</td></tr>
+<tr><td>Paragon III</td><td class="num">190</td><td class="num">608,229</td><td class="num">&times;1.17</td></tr>
+<tr><td>Saint I</td><td class="num">200</td><td class="num">731,069</td><td class="num">&times;1.20</td></tr>
+<tr><td>Saint II</td><td class="num">210</td><td class="num">907,871</td><td class="num">&times;1.24</td></tr>
+<tr><td>Saint III</td><td class="num">220</td><td class="num">1,045,932</td><td class="num">&times;1.15</td></tr>
+<tr><td>Ascendant I</td><td class="num">230</td><td class="num">1,588,197</td><td class="num">&times;1.52</td></tr>
+<tr><td>Ascendant II</td><td class="num">240</td><td class="num">2,085,321</td><td class="num">&times;1.31</td></tr>
+<tr><td>Ascendant III</td><td class="num">250</td><td class="num">3,018,756</td><td class="num">&times;1.45</td></tr>
+<tr><td>Divinity I</td><td class="num">260</td><td class="num">4,523,065</td><td class="num">&times;1.50</td></tr>
+<tr><td>Divinity II</td><td class="num">270</td><td class="num">7,067,523</td><td class="num">&times;1.56</td></tr>
+<tr><td>Divinity III</td><td class="num">280</td><td class="num">8,400,869</td><td class="num">&times;1.19</td></tr>
+<tr><td>Eternity I</td><td class="num">290</td><td class="num">9,807,437</td><td class="num">&times;1.17</td></tr>
+<tr><td>Eternity II</td><td class="num">300</td><td class="num">12,067,766</td><td class="num">&times;1.23</td></tr>
+<tr><td>Eternity III</td><td class="num">310</td><td class="num">15,315,923</td><td class="num">&times;1.27</td></tr>
+<tr><td>Genesis I</td><td class="num">320</td><td class="num">19,092,829</td><td class="num">&times;1.25</td></tr>
+<tr><td>Genesis II</td><td class="num">330</td><td class="num">22,330,661</td><td class="num">&times;1.17</td></tr>
+<tr><td>Genesis III</td><td class="num">340</td><td class="num">23,220,498</td><td class="num">&times;1.04</td></tr>
+<tr><td>Void I</td><td class="num">350</td><td class="num">24,188,222</td><td class="num">&times;1.04</td></tr>
+<tr><td>Void II</td><td class="num">360</td><td class="num">25,211,326</td><td class="num">&times;1.04</td></tr>
+<tr><td>Void III</td><td class="num">370</td><td class="num">26,296,035</td><td class="num">&times;1.04</td></tr>
+<tr><td>(unreleased)</td><td class="num">380</td><td class="num">27,501,278</td><td class="num">&times;1.05</td></tr>
+<tr><td>(unreleased)</td><td class="num">390</td><td class="num">28,789,372</td><td class="num">&times;1.05</td></tr>
+<tr><td>(unreleased)</td><td class="num">400</td><td class="num">30,169,666</td><td class="num">&times;1.05</td></tr>
+</tbody></table><caption>Source: <code>level_prop_battle_extra</code>, joined to <code>player_subrank</code> and <code>role_prop_group</code>.</caption></div>
+
+<h2>The Champion wall</h2>
+<p>One transition dwarfs the rest. Promoting out of Expert III multiplies the base value by
+<b>&times;4.56 at the same level</b> (10,987 &rarr; 50,061), and by the time you reach Champion I's own cap it
+has risen <b>&times;7.53</b> overall. Every other rank-up in the game falls between &times;1.04 and &times;1.7.</p>
+<div class="note warn">
+<p><b>Be precise about which number you quote.</b> The &times;7.53 figure spans the promotion <i>and</i> ten
+levels of growth. The promotion alone, measured at a fixed level 100, is &times;4.56. Both are real; they
+answer different questions.</p>
+<p>Two promotions actually <i>lower</i> the base value &mdash; Elite III &rarr; Expert I (&times;0.94) and
+Paragon III &rarr; Saint I (&times;0.90) &mdash; which makes existing gear relatively stronger.</p>
+</div>
+
+<h2>A tunable the developers left in</h2>
+<p>The normalisation is written as <code>(rating / ownBase) &times; (ownBase / theirBase)^k</code> with
+<code>k</code> hardcoded to <code>1.0</code>. As written that exponent is a no-op, but it is plainly a dial
+for how much the level gap matters. If elemental scaling ever shifts without a stat change, this is where.</p>
+</div>
+
+<footer class="site"><div class="in">
+  <p><b>Purrwikimania</b> — an independent, fan-made reference for <i>Sword x Staff</i> (Boltray Games).
+  Every number here is read directly out of the game's own configuration files and decompiled code,
+  not from testing or estimation. Item names are the game's official English strings.</p>
+  <p>Not affiliated with or endorsed by Boltray Games. Game names, images and data are the property of their owners.
+  Figures reflect the client build they were extracted from and can change with any patch — see
+  <a href="../method.html">Method</a> for exactly what was read and when.</p>
+</div></footer>
+</body>
+</html>

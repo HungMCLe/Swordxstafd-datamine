@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Level and rank scaling · Purrwikimania</title>
+<meta name="description" content="The three systems in Sword x Staff that scale damage by level and rank, with the real table values for each.">
+<meta property="og:title" content="Level and rank scaling · Purrwikimania">
+<meta property="og:description" content="The three systems in Sword x Staff that scale damage by level and rank, with the real table values for each.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="masthead"><div class="masthead-in">
+  <a class="brand" href="../index.html"><span class="paw">&#128062;</span>Purrwikimania<small>Sword x Staff, datamined</small></a>
+  <nav class="top"><a href="../index.html">Home</a><a href="../combat/index.html" aria-current="page">Combat mechanics</a><a href="../top-up-ladder.html">Top-up ladder</a><a href="../method.html">Method</a></nav>
+</div></header>
+
+<div class="wrap">
+<p class="eyebrow">Combat mechanics</p>
+<h1>Level and rank scaling</h1>
+<p class="lede">Three separate systems decide what happens when you fight something above or below your
+own level. They stack, and they are not equally important.</p>
+
+<h2>1. Level offset</h2>
+<p>Outside PvP, the game looks up the level gap in <code>fight_level_offset_damage</code> and applies a
+multiplier: damage is multiplied when you are higher level, divided when you are lower.</p>
+<div class="note">
+<p><b>This is a weak lever.</b> The scale caps at <b>+16%</b> from a gap of 4 levels through 20, and any gap
+beyond 20 falls back to <code>MaxLevelOffsetDamageScale</code>, which is only <b>+10%</b>. Raw level
+difference matters far less than most players assume.</p>
+</div>
+
+<h2>2. Rank offset</h2>
+<p>The same idea by rank, from <code>fight_rank_offset_damage</code>. This one is <b>dominant</b>. The
+per-rank damage scale (divided by 10,000) climbs steeply:</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Rank</th><th class="num">DamageScale</th></tr></thead>
+<tbody>
+<tr><td>No Rank</td><td class="num">0</td></tr>
+<tr><td>Apprentice / Elite / Expert</td><td class="num">0.7</td></tr>
+<tr><td>Champion</td><td class="num">15</td></tr>
+<tr><td>Master</td><td class="num">95</td></tr>
+<tr><td>Paragon</td><td class="num">300</td></tr>
+<tr><td>Saint</td><td class="num">700</td></tr>
+<tr><td>Ascendant I / II / III</td><td class="num">1,000 / 1,500 / 2,000</td></tr>
+<tr><td>Divinity I / II / III</td><td class="num">2,500 / 3,000 / 3,500</td></tr>
+</tbody></table><caption>The gap between two ranks, not the absolute value, sets the multiplier.</caption></div>
+
+<h2>3. Combat-rating suppression</h2>
+<p>A power-score comparison applied on top. It has one notable exemption: the check
+<code>IsCombatRatingSuppressionEfective</code> returns <b>false</b> when a player already out-ranks the
+monster &mdash; so once you are a full rank above the content, suppression stops applying and you simply
+steamroll it.</p>
+
+<h2>The one that actually hurts</h2>
+<p>None of the three is the real wall. The <a href="elemental.html">elemental base value</a> is: because your
+Mastery is divided by the <i>defender's</i> base and their RES by <i>yours</i>, fighting up is penalised twice
+over, and the effect is far larger than a &plusmn;16% level offset.</p>
+<p>Unlocking matters too &mdash; rank suppression only begins to apply from <code>SuppressUnlockRank</code>,
+which is set to <b>Champion I</b>.</p>
+</div>
+
+<footer class="site"><div class="in">
+  <p><b>Purrwikimania</b> — an independent, fan-made reference for <i>Sword x Staff</i> (Boltray Games).
+  Every number here is read directly out of the game's own configuration files and decompiled code,
+  not from testing or estimation. Item names are the game's official English strings.</p>
+  <p>Not affiliated with or endorsed by Boltray Games. Game names, images and data are the property of their owners.
+  Figures reflect the client build they were extracted from and can change with any patch — see
+  <a href="../method.html">Method</a> for exactly what was read and when.</p>
+</div></footer>
+</body>
+</html>
