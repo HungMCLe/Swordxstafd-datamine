@@ -596,6 +596,21 @@ def main():
         "stats": [{"key": k, "label": lb, "pct": k in PCT} for k, lb in STATS],
         "tiers": [{"tier": t, "classes": tiers[t]} for t in sorted(tiers)],
     }
+    def charm_props(sk):
+        """Per-rank stat contributions of a Charm, in the shape the sim applies."""
+        out = {}
+        for rk in sk["ranks"]:
+            row = {}
+            for pr, v in sk["vals"].get(str(rk), {}).items():
+                row[pr.replace("ST:", "")] = {"v": v, "pct": bool(sk["pct"].get(pr))}
+            for pr, m in sk["lmult"].get(str(rk), {}).items():
+                row[pr.replace("ST:", "")] = {"m": m, "g": sk["lgroup"][pr],
+                                              "k": sk["lkey"].get(pr, pr.replace("ST:", "")),
+                                              "pct": bool(sk["pct"].get(pr))}
+            if row:
+                out[str(rk)] = row
+        return out
+
     # ---- compact dataset for the duel simulator -------------------------------
     # element is not in any CSV (it lives in the binary EC prefabs), but the
     # client's own description names it inside a colour tag; no element means
@@ -608,7 +623,7 @@ def main():
     for t in data["tiers"]:
         for c in t["classes"]:
             for sk in c["skills"]:
-                if sk.get("type") != "Technique" or not sk.get("ranks"):
+                if not sk.get("ranks"):
                     continue
                 desc = sk.get("desc") or ""
                 m = _epat.search(desc)
@@ -631,7 +646,8 @@ def main():
                         per[str(rk)] = row
                 duel.append({"id": sk["id"], "name": sk["name"], "cls": c["name"],
                              "tier": t["tier"], "ele": m.group(1) if m else "Physical",
-                             "hits": max(1, min(hits, 20)), "r": per})
+                             "hits": max(1, min(hits, 20)), "r": per,
+                             "kind": sk["type"], "props": charm_props(sk)})
     (OUT / "_duel.json").write_text(json.dumps({"skills": duel, "lpidOf": lpid_of},
                                                ensure_ascii=False, separators=(",", ":")),
                                     encoding="utf-8")

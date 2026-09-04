@@ -6,6 +6,7 @@
   catch (e) { return; }
 
   var $ = function (id) { return document.getElementById(id); };
+  var TECH = 4, CHARM = 4;   /* the game gives exactly four of each */
   var DATA = null, CURVES = null, LOAD = { a: [null, null, null, null, null, null, null, null],
                                            b: [null, null, null, null, null, null, null, null] };
   var FIELDS = ["hp", "atk", "def", "spd", "mast", "kfm", "aff", "eres", "aegis",
@@ -14,10 +15,76 @@
 
   function n(id) { var el = $(id); if (!el) return 0; var v = parseFloat(el.value); return isFinite(v) ? v : 0; }
 
+  /* PropType -> the sheet field it feeds */
+  var PROP2FIELD = {
+    ElementMaster: "mast", KongFuMaster: "kfm", ElementResistance: "eres",
+    Attack: "atk", MaxHp: "hp", Defence: "def", Speed: "spd",
+    CritRatePercent: "cr", CritPowerPercent: "cd",
+    CritAvoidPercent: "critres", DmgAddPercent: "boost", DmgReducePercent: "dmgres",
+    BlockPercent: "blockrate", BlockValuePercent: "blockeff",
+    WindDamageAdd: "aff", WaterDamageAdd: "aff", FireDamageAdd: "aff",
+    LightDamageAdd: "aff", DarkDamageAdd: "aff",
+    WindDamageReduce: "aegis", WaterDamageReduce: "aegis", FireDamageReduce: "aegis",
+    LightDamageReduce: "aegis", DarkDamageReduce: "aegis",
+    FinalDamageReducePercent: "dmgres"
+  };
+  /* flat "value" forms divide by their per-rank base before joining the percentage */
+  var PROP2RATIO = {
+    CritRatePercentValue: ["cr", "BaseCritRatePercentValue"],
+    CritAvoidPercentValue: ["critres", "BaseCritAvoidPercentValue"],
+    BlockPercentValue: ["blockrate", "BaseBlockPercentValue"]
+  };
+  /* props this model has no place for — listed on the page rather than dropped */
+  var UNMODELLED = {
+    DamageByDamage: "reflected damage", FixedDamageByDamage: "reflected damage",
+    SkillCureByHp: "healing", SkillFixedCure: "healing",
+    StatusDmgReducePer: "status damage reduction", FixedStatusDmgReduce: "status damage reduction",
+    StatusDmgAddPer: "status damage", FixedStatusDmgAdd: "status damage",
+    SkillFixedShield: "shields", StatusFixedShieldAdd: "shields",
+    ShieldByDefence: "shields", ShieldByTargetHp: "shields",
+    EffectRate: "status landing rate", EffectDodge: "status resistance",
+    CureAddPercent: "healing", BeCureAddPercent: "healing", CureAdd: "healing"
+  };
+
+  function charmValue(entry, srank, slevel, rankName) {
+    if (entry.v !== undefined) return entry.v;
+    if (entry.m === undefined || !CURVES) return 0;
+    var lp = (DATA.lpidOf[String(entry.g)] || {})[rankIdOf(rankName)];
+    var curve = CURVES[lp];
+    if (!curve) return 0;
+    var row = curve[String(slevel)];
+    return row && row[entry.k] !== undefined ? row[entry.k] * entry.m : 0;
+  }
+
   function sheet(side) {
     var r = C.ranks[parseInt($(side + "_rank").value, 10)] || C.ranks[0];
     var s = { rank: r, srank: Math.round(n(side + "_srank")), slevel: Math.round(n(side + "_slevel")) };
     FIELDS.forEach(function (f) { s[f] = n(side + "_" + f); });
+    /* Charms are passive stats: CalcSkillPassiveProps, added to the typed sheet */
+    s.charmAdds = {}; s.ignored = {};
+    LOAD[side].slice(TECH).forEach(function (ch) {
+      if (!ch || !ch.props) return;
+      var row = ch.props[String(s.srank)];
+      if (!row) return;
+      Object.keys(row).forEach(function (prop) {
+        var v = charmValue(row[prop], s.srank, s.slevel, r.name);
+        if (!v) return;
+        var field = PROP2FIELD[prop];
+        if (field) {
+          s[field] += v;
+          s.charmAdds[field] = (s.charmAdds[field] || 0) + v;
+          return;
+        }
+        var ratio = PROP2RATIO[prop];
+        if (ratio) {
+          var add = v / r[ratio[1]] * 100;   /* into the sheet's percent units */
+          s[ratio[0]] += add;
+          s.charmAdds[ratio[0]] = (s.charmAdds[ratio[0]] || 0) + add;
+          return;
+        }
+        s.ignored[UNMODELLED[prop] || prop] = true;
+      });
+    });
     ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff"].forEach(function (f) { s[f] /= 100; });
     s.hp = Math.max(1, s.hp); s.atk = Math.max(1, s.atk); s.spd = Math.max(1, s.spd);
     return s;
@@ -78,8 +145,8 @@
 
   function oneFight(A, B, loadA, loadB, rng, wantLog) {
     var sides = [
-      { s: A, load: loadA, hp: A.hp, cd: loadA.map(function () { return 0; }), t: interval(A), name: "You" },
-      { s: B, load: loadB, hp: B.hp, cd: loadB.map(function () { return 0; }), t: interval(B), name: "Opponent" }
+      { s: A, load: loadA.slice(0, TECH), hp: A.hp, cd: [0, 0, 0, 0], t: interval(A), name: "You" },
+      { s: B, load: loadB.slice(0, TECH), hp: B.hp, cd: [0, 0, 0, 0], t: interval(B), name: "Opponent" }
     ];
     var log = [], turns = 0, MAXT = 400;
     while (sides[0].hp > 0 && sides[1].hp > 0 && turns < MAXT) {
@@ -166,6 +233,30 @@
     }).join("");
     $("logbody").innerHTML = rows || '<tr><td colspan="5">no actions</td></tr>';
     drawHp(sample, A, B);
+    charmReport(A);
+  }
+
+  var LABEL = { hp: "HP", atk: "ATK", def: "DEF", spd: "SPD", mast: "Elemental Mastery",
+                kfm: "Physical Mastery", aff: "Affinity", eres: "Elemental RES", aegis: "Aegis",
+                cr: "Crit Rate", cd: "Crit DMG", critres: "Crit RES", boost: "DMG Boost",
+                dmgres: "DMG RES", blockrate: "Block Rate", blockeff: "Block Efficiency",
+                acc: "Accuracy" };
+  var PCTF = { cr: 1, cd: 1, critres: 1, boost: 1, dmgres: 1, blockrate: 1, blockeff: 1 };
+
+  function charmReport(A) {
+    var added = Object.keys(A.charmAdds).map(function (f) {
+      var v = A.charmAdds[f];
+      return "<b>+" + (PCTF[f] ? v.toFixed(1) + "%" : fmt(v)) + "</b> " + (LABEL[f] || f);
+    });
+    var skipped = Object.keys(A.ignored);
+    var html = added.length
+      ? "Your Charms add " + added.join(", ") + " to the sheet above."
+      : "Your Charms add nothing this model uses.";
+    if (skipped.length) {
+      html += " They also give " + skipped.join(", ") +
+        " &mdash; none of which this simulation covers, so those Charms are doing less here than in game.";
+    }
+    $("charmnote").innerHTML = html;
   }
 
   function drawHp(sample, A, B) {
@@ -202,8 +293,8 @@
   var current = null;
   function paint(side, slot) {
     var el = $(side + "_slot" + slot), sk = LOAD[side][slot];
-    if (!sk) { el.className = "slot"; el.innerHTML = '<span class="slotnum">' + (slot + 1) + '</span>'; return; }
-    el.className = "slot filled ele-" + sk.ele.toLowerCase();
+    if (!sk) { el.className = "slot " + (slot >= TECH ? "charm" : "tech"); el.innerHTML = '<span class="slotnum">' + (slot + 1) + '</span>'; return; }
+    el.className = "slot filled " + (slot >= TECH ? "charm" : "tech") + " ele-" + sk.ele.toLowerCase();
     el.innerHTML = '<img src="../assets/skills/skill_' + sk.id + '.png" alt="" width="44" height="44" loading="lazy">' +
       '<span class="slotname">' + sk.name + '</span>';
   }
@@ -211,26 +302,30 @@
     current = { side: side, slot: slot };
     $("pickfind").value = "";
     fillList("");
+    $("pickfind").placeholder = "Search " + (slot >= TECH ? "Charms" : "Techniques") + "…";
     $("picker").showModal();
     $("pickfind").focus();
   }
   function fillList(q) {
     q = q.toLowerCase();
+    var want = current && current.slot >= TECH ? "Charm" : "Technique";
     var out = DATA.skills.filter(function (s) {
+      if (s.kind !== want) return false;
       return !q || s.name.toLowerCase().indexOf(q) >= 0 || s.cls.toLowerCase().indexOf(q) >= 0;
     }).slice(0, 200).map(function (s) {
       return '<button type="button" class="pick" data-id="' + s.id + '">' +
         '<img src="../assets/skills/skill_' + s.id + '.png" alt="" width="34" height="34" loading="lazy">' +
         '<span class="pn">' + s.name + '</span>' +
-        '<span class="pm">' + s.cls + ' &middot; T' + s.tier + ' &middot; ' + s.ele +
-        (s.hits > 1 ? " &middot; " + s.hits + " hits" : "") + '</span></button>';
+        '<span class="pm">' + s.cls + ' &middot; T' + s.tier +
+        (s.kind === "Technique" ? ' &middot; ' + s.ele + (s.hits > 1 ? ' &middot; ' + s.hits + ' hits' : '')
+                                 : ' &middot; Charm') + '</span></button>';
     }).join("");
     $("picklist").innerHTML = out || '<p class="pickempty">Nothing matches.</p>';
   }
 
   function boot() {
     ["a", "b"].forEach(function (side) {
-      for (var i = 0; i < 8; i++) {
+      for (var i = 0; i < TECH + CHARM; i++) {
         (function (s, k) {
           $(s + "_slot" + k).addEventListener("click", function () { openPicker(s, k); });
         })(side, i);
@@ -246,15 +341,28 @@
       var b = ev.target.closest ? ev.target.closest(".pick") : null;
       if (!b || !current) return;
       var id = parseInt(b.getAttribute("data-id"), 10);
-      LOAD[current.side][current.slot] = DATA.skills.filter(function (s) { return s.id === id; })[0] || null;
+      var picked = DATA.skills.filter(function (s) { return s.id === id; })[0] || null;
+      /* the same skill cannot occupy two slots, so move it rather than duplicate */
+      if (picked) {
+        LOAD[current.side].forEach(function (x, k) {
+          if (x && x.id === picked.id && k !== current.slot) {
+            LOAD[current.side][k] = null; paint(current.side, k);
+          }
+        });
+      }
+      LOAD[current.side][current.slot] = picked;
       paint(current.side, current.slot);
       $("picker").close();
     });
     $("run").addEventListener("click", run);
-    $("mirror").addEventListener("change", function () {
-      document.querySelector('.side[data-side="b"]').classList.toggle("dimmed", this.checked);
+    $("reset").addEventListener("click", function () {
+      try { localStorage.removeItem("pw_duel"); } catch (e) {}
+      location.reload();
     });
-    document.querySelector('.side[data-side="b"]').classList.add("dimmed");
+    $("mirror").addEventListener("change", function () {
+      document.querySelector('.duelside[data-side="b"]').classList.toggle("dimmed", this.checked);
+    });
+    document.querySelector('.duelside[data-side="b"]').classList.add("dimmed");
   }
 
   Promise.all([
@@ -264,8 +372,9 @@
     DATA = v[0]; CURVES = v[1];
     boot();
     /* a sensible opening loadout: the first few Techniques of a mid tier */
-    var seed = DATA.skills.filter(function (s) { return s.tier === 3; }).slice(0, 4);
-    seed.forEach(function (s, i) { LOAD.a[i] = s; LOAD.b[i] = s; paint("a", i); paint("b", i); });
+    var t3 = DATA.skills.filter(function (s) { return s.tier === 3 && s.kind === "Technique"; }).slice(0, TECH);
+    var c3 = DATA.skills.filter(function (s) { return s.tier === 3 && s.kind === "Charm" && s.props && Object.keys(s.props).length; }).slice(0, CHARM);
+    t3.concat(c3).forEach(function (s, i) { LOAD.a[i] = s; LOAD.b[i] = s; paint("a", i); paint("b", i); });
     $("run").disabled = false;
   }).catch(function () {
     $("run").textContent = "Could not load skill data";
