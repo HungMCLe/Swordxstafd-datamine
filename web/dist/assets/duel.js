@@ -303,16 +303,23 @@
     $("pickfind").value = "";
     fillList("");
     $("pickfind").placeholder = "Search " + (slot >= TECH ? "Charms" : "Techniques") + "…";
+    $("pickele").hidden = slot >= TECH;
     $("picker").showModal();
     $("pickfind").focus();
   }
   function fillList(q) {
     q = q.toLowerCase();
     var want = current && current.slot >= TECH ? "Charm" : "Technique";
-    var out = DATA.skills.filter(function (s) {
+    var wantCls = $("pickclass").value, wantEle = $("pickele").value;
+    var matches = DATA.skills.filter(function (s) {
       if (s.kind !== want) return false;
+      if (wantCls && s.cls !== wantCls) return false;
+      if (wantEle && want === "Technique" && s.ele !== wantEle) return false;
       return !q || s.name.toLowerCase().indexOf(q) >= 0 || s.cls.toLowerCase().indexOf(q) >= 0;
-    }).slice(0, 200).map(function (s) {
+    });
+    $("pickcount").textContent = matches.length + " of " +
+      DATA.skills.filter(function (s) { return s.kind === want; }).length;
+    var out = matches.slice(0, 200).map(function (s) {
       var on = LOAD[current.side].some(function (x, k) { return x && x.id === s.id && k !== current.slot; });
       return '<button type="button" class="pick' + (on ? " equipped" : "") + '" data-id="' + s.id + '">' +
         '<img src="../assets/skills/skill_' + s.id + '.png" alt="" width="34" height="34" loading="lazy">' +
@@ -325,7 +332,32 @@
     $("picklist").innerHTML = out || '<p class="pickempty">Nothing matches.</p>';
   }
 
+  function buildFilters() {
+    var byTier = {}, eles = {};
+    DATA.skills.forEach(function (s) {
+      (byTier[s.tier] = byTier[s.tier] || {})[s.cls] = true;
+      if (s.kind === "Technique") eles[s.ele] = true;
+    });
+    var html = '<option value="">All classes</option>';
+    Object.keys(byTier).sort().forEach(function (t) {
+      html += '<optgroup label="Tier ' + t + '">';
+      Object.keys(byTier[t]).sort().forEach(function (c) {
+        html += '<option value="' + c + '">' + c + '</option>';
+      });
+      html += '</optgroup>';
+    });
+    $("pickclass").innerHTML = html;
+    var eh = '<option value="">Any element</option>';
+    ["Physical", "Wind", "Water", "Fire", "Light", "Dark"].forEach(function (e) {
+      if (eles[e]) eh += '<option value="' + e + '">' + e + '</option>';
+    });
+    $("pickele").innerHTML = eh;
+  }
+
   function boot() {
+    buildFilters();
+    $("pickclass").addEventListener("change", function () { fillList($("pickfind").value); });
+    $("pickele").addEventListener("change", function () { fillList($("pickfind").value); });
     ["a", "b"].forEach(function (side) {
       for (var i = 0; i < TECH + CHARM; i++) {
         (function (s, k) {
