@@ -436,3 +436,11 @@ table.log{font-size:13px} table.log td{padding:6px 12px}
 .slot.charm.filled{border-color:var(--blue-rail)}
 .pick.equipped{background:var(--raised)}
 .pick.equipped .pn{color:var(--muted)}
+
+.pickfilters{display:flex;flex-wrap:wrap;align-items:center;gap:9px;padding:10px 14px;
+  border-bottom:1px solid var(--line);background:var(--surface)}
+.pickfilters select{font:500 13px var(--body);padding:7px 9px;border-radius:7px;
+  background:var(--raised);color:var(--ink);border:1px solid var(--line);cursor:pointer}
+.pickcount{margin-left:auto;font:500 12px var(--mono);color:var(--faint)}
+.pickhead{position:sticky;top:0;z-index:2}
+.pickfilters{position:sticky;top:59px;z-index:2}

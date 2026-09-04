@@ -144,9 +144,14 @@ def render(layout, base_tables, dist: Path, out: Path):
 
 <dialog id="picker" class="picker">
   <div class="pickhead">
-    <input type="search" id="pickfind" placeholder="Search&hellip;"  autocomplete="off">
+    <input type="search" id="pickfind" placeholder="Search&hellip;" autocomplete="off">
     <button type="button" id="pickclear" class="pickbtn">Clear slot</button>
     <button type="button" id="pickclose" class="pickbtn">Close</button>
+  </div>
+  <div class="pickfilters">
+    <select id="pickclass" aria-label="Filter by class"><option value="">All classes</option></select>
+    <select id="pickele" aria-label="Filter by element"><option value="">Any element</option></select>
+    <span id="pickcount" class="pickcount"></span>
   </div>
   <div id="picklist" class="picklist"></div>
 </dialog>
