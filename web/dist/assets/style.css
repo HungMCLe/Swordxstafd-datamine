@@ -643,6 +643,7 @@ select.fclass:disabled{opacity:.7;cursor:default}
 .skilltip .tt-rows{display:grid;grid-template-columns:1fr auto;gap:2px 12px;margin:6px 0 8px;padding:6px 0;
   border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:12.5px}
 .skilltip .tt-rows dt{color:var(--muted)} .skilltip .tt-rows dd{margin:0;font:600 12.5px var(--mono);text-align:right}
+.skilltip .tt-rows dd.tt-wrap{font:500 12px var(--body);text-align:left;color:var(--ink)}
 .skilltip .tt-desc{color:var(--muted);font-size:12.5px}
 .skilltip .tt-desc .kw{color:var(--gold);border-bottom:1px dotted currentColor}
 .skilltip .tt-desc .dnum{font-family:var(--mono);font-weight:600;color:var(--ink)}

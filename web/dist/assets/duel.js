@@ -92,7 +92,7 @@
     FIELDS.forEach(function (f) { s[f] = n(side + "_" + f); });
     /* Charms are passive stats: CalcSkillPassiveProps, added to the typed sheet */
     LOAD[side].slice(TECH).forEach(function (ch) {
-      if (!ch || !ch.props) return;
+      if (!ch || !ch.props || ch.condProps) return;
       var row = ch.props[String(s.srank)];
       if (row) foldProps(s, row, s.srank, s.slevel, r, s.charmAdds);
     });
@@ -109,11 +109,12 @@
     PCT_FIELDS.forEach(function (f) { e[f] = base[f] * 100; });
     e.vuln = base.vuln * 100; e.ignored = null;
     side.st.forEach(function (st) {
-      var props = st.meta.props;
+      /* a stacking status folds its row once per stack ("stacks up to 3 times") */
+      var props = st.meta.props || st.props, times = st.meta.stack ? (st.stacks || 1) : 1;
       if (!props) return;
       var cs = sides[st.creator].s;
       var row = props[String(cs.srank)];
-      if (row) foldProps(e, row, cs.srank, cs.slevel, cs.rank, null);
+      if (row) for (var i = 0; i < times; i++) foldProps(e, row, cs.srank, cs.slevel, cs.rank, null);
     });
     PCT_FIELDS.forEach(function (f) { e[f] /= 100; });
     e.vuln /= 100;
@@ -329,13 +330,14 @@
     });
   }
 
-  function statusName(meta) {
+  function statusName(meta, lent) {
     if (meta.action === "Blinding") return "Blind";
-    if (meta.action && meta.action !== "Status" && meta.action !== "PassiveStatus") return meta.action;
+    if (meta.action && meta.action !== "Status" && meta.action !== "PassiveStatus" && meta.action !== "None") return meta.action;
     if (meta.shield) return "Shield";
-    var p = meta.props && meta.props["22"];
-    if (p) {
-      var k = Object.keys(p)[0];
+    var src = meta.props || lent;
+    var p = src && src["22"];
+    var k = p && Object.keys(p).filter(function (x) { return !TRIGGER_DISPLAY.test(x); })[0];
+    if (k) {
       var LAB = { StatusDmgReducePer: "DMG RES", FixedStatusDmgReduce: "DMG RES", StatusDmgAddPer: "DMG Boost",
                   AttackScale: "ATK", DefenceScale: "DEF", SpeedScale: "SPD", MaxHpScale: "HP",
                   DmgAddPercent: "DMG Boost", DmgReducePercent: "DMG RES", CritRatePercent: "Crit Rate",
@@ -343,6 +345,7 @@
                   DmgVulnerable: "Vulnerable", CritAvoidPercent: "Crit RES", ElementMaster: "Mastery" };
       return (meta.type === "Debuff" || meta.type === "AbnormalDebuff" ? "−" : "+") + (LAB[k] || k);
     }
+    if (meta.stack) return meta.type === "Debuff" ? "Mark" : "Stack";
     return meta.type === "Debuff" ? "Debuff" : meta.type === "Buff" ? "Buff" : "Effect";
   }
 
@@ -355,13 +358,13 @@
         s: S, load: techs, charms: load.slice(TECH), hp: S.hp, t: interval(S), idx: idx, turns: 0,
         cd: openingCds(techs, load.slice(TECH), S.srank),
         uses: techs.map(function () { return 0; }),
-        st: [], shield: 0, charmFired: {}
+        st: [], shield: 0, charmFired: {}, techCasts: 0
       };
     }
     var sides = [side(A, loadA, 0), side(B, loadB, 1)];
     var log = [], turns = 0, MAXT = 600, capped = false, events;
 
-    function applyStatus(tgt, sid, creatorIdx) {
+    function applyStatus(tgt, sid, creatorIdx, lent) {
       var meta = DATA.statuses[String(sid)];
       if (!meta || meta.falloff || meta.dur === 0) return null;
       var have = tgt.st.filter(function (x) { return x.id === sid; })[0];
@@ -370,7 +373,7 @@
         have.dur = meta.dur; have.skills = meta.skillCount || 0;
         return have;
       }
-      var st = { id: sid, meta: meta, dur: meta.dur, skills: meta.skillCount || 0, creator: creatorIdx, stacks: 1 };
+      var st = { id: sid, meta: meta, dur: meta.dur, skills: meta.skillCount || 0, creator: creatorIdx, stacks: 1, props: lent || null };
       tgt.st.push(st);
       return st;
     }
@@ -407,6 +410,7 @@
           var target = (o.target === "DamageTarget") ? tgt : src;
           if (rng() < landChance(o.chance, o.byProp, meta.type, srcE, tgtE)) {
             var st = applyStatus(target, o.status, src.idx);
+            if (st && meta.shield) { var amt = shieldSize(meta, src, target) * GOV; if (amt > 0) target.shield = Math.max(target.shield, amt); }
             if (st && events) events.push({ kind: "status", who: target.idx, name: statusName(meta) });
           }
         });
@@ -414,6 +418,105 @@
     }
 
     /* roll every hit of one skill: falloff, blind, block, crit, shield */
+    /* ---- Charm passives: one runner for every trigger kind the data carries ----
+       holder = the Charm's owner; enemy = the other side; trig = whoever the
+       trigger involved (the target you hit, the attacker who hit you, else the
+       holder). A status the Charm applies takes the Charm's own row as its
+       numbers when the status has none (Blazing Clash's stack is +DMG from the
+       Charm's StatusDmgAddPer, once per stack). */
+    function charmStrike(ch, holder, tgt) {
+      var hE = eff(holder, sides), tE = eff(tgt, sides); hE.hpMax = holder.s.hp; tE.hpMax = tgt.s.hp;
+      var rows = (ch.r || {})[String(holder.s.srank)] || {};
+      var fake = { id: ch.id, name: ch.name, ele: ch.ele || "Physical", hits: 1, r: ch.r || {}, pvp: ch.pvp || 10000 };
+      var parts = hitParts(hE, tE, fake, rows);
+      if (parts.heal) {
+        var before = holder.hp; holder.hp = Math.min(holder.s.hp, holder.hp + parts.heal * GOV);
+        if (events) events.push({ kind: "heal", who: holder.idx, amount: holder.hp - before, tag: ch.name });
+        return;
+      }
+      var total = landHits(parts, holder, tgt, hE, tE, fake);
+      if (events && total > 0) events.push({ kind: "dmg", who: tgt.idx, amount: total, tag: ch.name });
+    }
+    function firePassive(pv, ch, holder, enemy, trig) {
+      var key = ch.id + ":" + pv.kind + ":" + pv.status;
+      if (pv.maxCount > 0 && (holder.charmFired[key] || 0) >= pv.maxCount) return false;
+      holder.charmFired[key] = (holder.charmFired[key] || 0) + 1;
+      function pick(t) {
+        if (t === "Enemy") return enemy;
+        if (t === "TriggerSource" || t === "TriggerTarget") return trig;
+        return holder;
+      }
+      (pv.triggers || []).forEach(function (t) {
+        if (rng() < pv.rate * t.chance) fireSkill(t.skill, holder, pick(t.target), ch.name);
+      });
+      (pv.statuses || []).forEach(function (o) {
+        var meta = DATA.statuses[String(o.status)]; if (!meta) return;
+        if (rng() >= pv.rate * (o.chance === undefined ? 1 : o.chance)) return;
+        var tgt = pick(o.target);
+        var lent = (meta.props || (pv.stackTrigger && pv.stackTrigger.status === o.status)) ? null : (ch.props || null);
+        var st = applyStatus(tgt, o.status, holder.idx, lent);
+        if (!st) return;
+        if (meta.shield) { var amt = shieldSize(meta, holder, tgt) * GOV; if (amt > 0) tgt.shield = Math.max(tgt.shield, amt); }
+        if (events) events.push({ kind: "status", who: tgt.idx, name: statusName(meta, lent) + (st.stacks > 1 ? " \u00d7" + st.stacks : ""), tag: ch.name });
+        if (pv.stackTrigger && pv.stackTrigger.status === o.status && st.stacks >= pv.stackTrigger.count) {
+          st.stacks -= pv.stackTrigger.count;
+          if (st.stacks <= 0) removeStatus(tgt, st);
+          charmStrike(ch, holder, tgt);
+        }
+      });
+      return true;
+    }
+    function procs(holder, kind, enemy, trig, filter) {
+      holder.charms.forEach(function (ch) {
+        (ch && ch.passive || []).forEach(function (pv) {
+          if (pv.kind !== kind) return;
+          if (filter && !filter(pv)) return;
+          firePassive(pv, ch, holder, enemy, trig);
+        });
+      });
+    }
+    /* a lethal hit meets a death-save Charm: the floor it leaves, and the heal on its card */
+    function deathSave(who) {
+      var out = null;
+      who.charms.forEach(function (ch) {
+        (ch && ch.passive || []).forEach(function (pv) {
+          if (out || pv.kind !== "deathSave") return;
+          var key = ch.id + ":saved:" + pv.status;
+          if ((who.charmFired[key] || 0) >= (pv.maxCount > 0 ? pv.maxCount : 1)) return;
+          who.charmFired[key] = (who.charmFired[key] || 0) + 1;
+          out = { limit: pv.limit || 1, ch: ch, pv: pv, heal: 0 };
+          var row = ch.props && ch.props[String(who.s.srank)];
+          if (row) {
+            if (row.SkillCureByHp) out.heal += curveValue(row.SkillCureByHp, who.s.srank, who.s.slevel, who.s.rank.name) / 100 * who.s.hp;
+            if (row.SkillFixedCure) out.heal += curveValue(row.SkillFixedCure, who.s.srank, who.s.slevel, who.s.rank.name);
+            out.heal *= GOV;
+          }
+        });
+      });
+      return out;
+    }
+    /* after damage lands on `who`: HP-loss stacks, and the under-threshold trigger */
+    function afterDamage(who, from) {
+      who.charms.forEach(function (ch) {
+        (ch && ch.passive || []).forEach(function (pv) {
+          if (pv.kind === "hpUnit") {
+            var key = ch.id + ":units:" + pv.status;
+            var units = Math.floor((1 - who.hp / who.s.hp) / pv.unit + 1e-9);
+            if (pv.maxCount > 0) units = Math.min(units, pv.maxCount);
+            while ((who.charmFired[key] || 0) < units) {
+              who.charmFired[key] = (who.charmFired[key] || 0) + 1;
+              firePassive(pv, ch, who, from, from);
+            }
+          } else if (pv.kind === "hpBelow") {
+            var k2 = ch.id + ":below:" + pv.status;
+            if (who.hp < pv.pct * who.s.hp) {
+              if (!who.charmFired[k2]) { who.charmFired[k2] = 1; firePassive(pv, ch, who, from, from); }
+            } else who.charmFired[k2] = 0;
+          }
+        });
+      });
+    }
+
     function landHits(parts, me, foe, meE, foeE, pick, rolled) {
       var p = critChance(meE, foeE), m = critMult(meE, foeE);
       var b = blockChance(meE, foeE), bd = blockDiv(foeE);
@@ -436,8 +539,18 @@
           absorbed = Math.min(foe.shield, d); foe.shield -= absorbed; d -= absorbed;
           if (foe.shield <= 0) foe.st.filter(function (x) { return x.meta.shield; }).forEach(function (x) { removeStatus(foe, x); });
         }
+        var saved = null;
+        if (d > 0 && d >= foe.hp) { saved = deathSave(foe); if (saved) d = Math.max(0, foe.hp - saved.limit); }
         foe.hp -= d; total += d;
-        if (rolled) rolled.push({ d: d, crit: crit, block: block, absorbed: absorbed, blinded: blinded, at: h.at || 0 });
+        if (rolled) rolled.push({ d: d, crit: crit, block: block, absorbed: absorbed, blinded: blinded, at: h.at || 0, saved: !!saved });
+        if (saved) {
+          if (events) events.push({ kind: "save", who: foe.idx, tag: saved.ch.name });
+          if (saved.heal > 0) {
+            var b0 = foe.hp; foe.hp = Math.min(foe.s.hp, foe.hp + saved.heal);
+            if (events) events.push({ kind: "heal", who: foe.idx, amount: foe.hp - b0, tag: saved.ch.name });
+          }
+          firePassive(saved.pv, saved.ch, foe, me, me);
+        } else if (d > 0) afterDamage(foe, me);
       });
       return total;
     }
@@ -452,7 +565,7 @@
               var src = t.source === "Creator" ? sides[st.creator] : me;
               var tgt = t.target === "Creator" ? sides[st.creator] : me;
               if (rng() < (t.byProp ? landChance(t.chance, true, null, eff(src, sides), eff(tgt, sides)) : t.chance))
-                fireSkill(t.skill, src, tgt, statusName(st.meta) + " ends");
+                fireSkill(t.skill, src, tgt, statusName(st.meta, st.props) + " ends");
             });
             removeStatus(me, st);
           }
@@ -473,17 +586,10 @@
         (st.meta.roundStart || []).forEach(function (t) {
           var src = t.source === "Creator" ? sides[st.creator] : me;
           var tgt = t.target === "Creator" ? sides[st.creator] : me;
-          if (rng() < t.chance) fireSkill(t.skill, src, tgt, statusName(st.meta));
+          if (rng() < t.chance) fireSkill(t.skill, src, tgt, statusName(st.meta, st.props));
         });
       });
-      me.charms.forEach(function (ch, ci) {
-        (ch && ch.passive || []).forEach(function (pv) {
-          if (pv.kind !== "roundStart") return;
-          pv.triggers.forEach(function (t) {
-            if (rng() < pv.rate * t.chance) fireSkill(t.skill, me, t.target === "Enemy" ? foe : me, ch.name);
-          });
-        });
-      });
+      procs(me, "roundStart", foe, me);
       if (me.hp <= 0 || foe.hp <= 0) { if (wantLog) log.push(entry(me, null, -1, [], 0, events, "start")); break; }
 
       var skip = me.st.filter(function (x) { return SKIP_ACTIONS[x.meta.action]; })[0];
@@ -493,6 +599,7 @@
       /* one cast: hits, rolls, statuses, procs; returns what the log needs */
       function cast(pick, slot) {
         var rolled = [], total = 0;
+        if (slot >= 0) procs(me, "skillStart", foe, foe);
         var meE = eff(me, sides), foeE = eff(foe, sides);
         meE.hpMax = me.s.hp; foeE.hpMax = foe.s.hp;
         var rows = pick.id === 0 ? {} : (pick.r[String(me.s.srank)] || {});
@@ -532,24 +639,14 @@
         var bl = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
         if (bl && isAttack) removeStatus(me, bl);
         if (total > 0) {
-          me.charms.forEach(function (ch) {
-            (ch && ch.passive || []).forEach(function (pv) {
-              if (pv.kind !== "hit" || (pv.onlyAttack && !isAttack)) return;
-              pv.triggers.forEach(function (t) {
-                if (rng() < pv.rate * t.chance) fireSkill(t.skill, me, t.target === "Applicator" ? me : foe, ch.name);
-              });
-            });
-          });
-          foe.charms.forEach(function (ch) {
-            (ch && ch.passive || []).forEach(function (pv) {
-              if (pv.kind !== "damaged") return;
-              pv.triggers.forEach(function (t) {
-                if (rng() < pv.rate * t.chance) fireSkill(t.skill, foe, t.target === "Applicator" ? foe : me, ch.name);
-              });
-            });
-          });
+          procs(me, "hit", foe, foe, function (pv) { return !(pv.onlyAttack && !isAttack); });
+          procs(foe, "damaged", me, me);
         }
-        if (slot >= 0) { me.cd[slot] = cdOf(pick, me.s.srank) + 1; me.uses[slot]++; }
+        if (slot >= 0) {
+          me.cd[slot] = cdOf(pick, me.s.srank) + 1; me.uses[slot]++;
+          me.techCasts++;
+          procs(me, "skillEnd", foe, foe, function (pv) { return me.techCasts % pv.every === 0; });
+        }
         return { rolled: rolled, total: total };
       }
 
@@ -573,15 +670,11 @@
           /* nothing ready: a basic attack, and the Charms that key off a Technique-less turn */
           events = wantLog ? [] : null;
           var rb = cast(BASIC, -1);
-          me.charms.forEach(function (ch) {
-            (ch && ch.passive || []).forEach(function (pv) {
-              if (pv.kind !== "roundCheck") return;
-              pv.triggers.forEach(function (t) { if (rng() < pv.rate * t.chance) fireSkill(t.skill, me, me, ch.name); });
-            });
-          });
+          procs(me, "roundCheck", foe, me);
           if (wantLog) log.push(entry(me, BASIC, -1, rb.rolled, rb.total, events, null, 0));
         }
       }
+      procs(me, "roundEnd", foe, me);
       tickEnd(me);
       me.t += interval(eff(me, sides));
     }
@@ -594,8 +687,8 @@
                events: ev || [], turn: me.turns, cd: me.cd.slice(), note: note,
                hpA: Math.max(0, sides[0].hp), hpB: Math.max(0, sides[1].hp),
                shA: Math.round(sides[0].shield), shB: Math.round(sides[1].shield),
-               stA: sides[0].st.map(function (x) { return { n: statusName(x.meta), d: x.dur, s: x.stacks, t: x.meta.type }; }),
-               stB: sides[1].st.map(function (x) { return { n: statusName(x.meta), d: x.dur, s: x.stacks, t: x.meta.type }; }),
+               stA: sides[0].st.map(function (x) { return { n: statusName(x.meta, x.props), d: x.dur, s: x.stacks, t: x.meta.type }; }),
+               stB: sides[1].st.map(function (x) { return { n: statusName(x.meta, x.props), d: x.dur, s: x.stacks, t: x.meta.type }; }),
                left: Math.max(0, foe.hp) };
     }
     return { winner: sides[0].hp <= 0 ? 1 : (sides[1].hp <= 0 ? 0 : -1), capped: capped,
@@ -663,7 +756,8 @@
     var rows = sample.log.map(function (l) {
       var hits = l.hits.map(function (h) { return h.blinded ? "x" : h.block ? "B" : (h.crit ? "C" : "·"); }).join("");
       var ev = l.events.map(function (e) {
-        return e.kind === "dmg" ? e.tag + " " + fmt(e.amount) : e.kind === "heal" ? e.tag + " +" + fmt(e.amount) : e.name + " on " + WHO[e.who];
+        return e.kind === "dmg" ? e.tag + " " + fmt(e.amount) : e.kind === "heal" ? e.tag + " +" + fmt(e.amount)
+             : e.kind === "save" ? WHO[e.who] + " survives at 1 HP (" + e.tag + ")" : e.name + " on " + WHO[e.who];
       }).join("; ");
       return "<tr><td class=num>" + l.t + "</td><td class=num>" + l.turn + "</td><td>" + l.who +
         "</td><td>" + l.skill + (ev ? " <i>(" + ev + ")</i>" : "") +
@@ -685,6 +779,32 @@
                 fadd: "flat DMG add", fred: "flat DMG reduce" };
   var PCTF = { cr: 1, cd: 1, critres: 1, boost: 1, dmgres: 1, blockrate: 1, blockeff: 1, vuln: 1 };
 
+  var PROC_LABEL = { hit: "on your hits", roundStart: "at the start of your turns", roundEnd: "at the end of your turns",
+                     damaged: "when you are hit", roundCheck: "on a turn with no Technique", skillStart: "as a Technique starts",
+                     deathSave: "on lethal damage, once" };
+  function procLabel(pv, ch) {
+    var when = PROC_LABEL[pv.kind] || pv.kind;
+    if (pv.kind === "skillEnd") when = "every " + pv.every + " Techniques";
+    if (pv.kind === "hpUnit") when = "per " + Math.round(pv.unit * 100) + "% of HP lost";
+    if (pv.kind === "hpBelow") when = "when HP drops under " + Math.round(pv.pct * 100) + "%";
+    if (pv.rate < 1) when += " (" + Math.round(pv.rate * 100) + "%)";
+    var does = [];
+    if (pv.kind === "deathSave") does.push("survives at " + (pv.limit || 1) + " HP and heals");
+    (pv.triggers || []).forEach(function (t) {
+      var tr = DATA.trig[String(t.skill)];
+      does.push(tr && !/^skill \d+$/.test(tr.name) ? "fires " + tr.name : "strikes with its own numbers");
+    });
+    (pv.statuses || []).forEach(function (o) {
+      var m = DATA.statuses[String(o.status)]; if (!m) return;
+      var onTarget = o.target === "TriggerTarget" || o.target === "TriggerSource" || o.target === "Enemy";
+      var nm = statusName(m, m.props ? null : (ch && ch.props));
+      if (pv.stackTrigger && pv.stackTrigger.status === o.status)
+        does.push("stacks " + nm + " on the target; at " + pv.stackTrigger.count + " it strikes with the Charm's own DMG");
+      else does.push((m.stack ? "adds a stack of " : "applies ") + nm + (onTarget ? " to the target" : ""));
+    });
+    return when + (does.length ? ": " + does.join(", ") : "");
+  }
+
   function charmReport(A) {
     var added = Object.keys(A.charmAdds).map(function (f) {
       var v = A.charmAdds[f];
@@ -697,12 +817,8 @@
                    " turn off every Technique's opening cooldown (the timing is from its prefab; the amount is from its text)");
         return;
       }
-      (ch && ch.passive || []).forEach(function (pv) {
-        var K = { hit: "on your hits", roundStart: "each of your turns", damaged: "when you are hit", roundCheck: "on a turn with no Technique", skillStart: "when a skill starts" };
-        procs.push("<b>" + ch.name + "</b> fires " + (pv.triggers.map(function (t) {
-          var tr = DATA.trig[String(t.skill)]; return tr ? tr.name : "a skill";
-        }).join(", ")) + " " + (K[pv.kind] || pv.kind) + (pv.rate < 1 ? " (" + Math.round(pv.rate * 100) + "%)" : ""));
-      });
+      (ch && ch.passive || []).forEach(function (pv) { procs.push("<b>" + ch.name + "</b> " + procLabel(pv, ch)); });
+      if (ch && ch.unmodelled) procs.push("<b>" + ch.name + "</b> also has " + ch.unmodelled.join(", ") + ", which the sim does not model");
     });
     var skipped = Object.keys(A.ignored);
     var html = added.length ? "Your Charms add " + added.join(", ") + " to the sheet." : "Your Charms add no flat stats.";
@@ -955,6 +1071,7 @@
   function eventText(e) {
     if (e.kind === "heal") return '<span class="ev heal">' + WHO[e.who] + ' heals ' + fmt(e.amount) + ' <i>(' + e.tag + ')</i></span>';
     if (e.kind === "dmg") return '<span class="ev">' + e.tag + ' hits ' + WHO[e.who] + ' for ' + fmt(e.amount) + '</span>';
+    if (e.kind === "save") return '<span class="ev heal">' + WHO[e.who] + ' survives at 1 HP <i>(' + e.tag + ')</i></span>';
     return '<span class="ev st">\u2726 ' + e.name + ' on ' + WHO[e.who] + '</span>';
   }
   function headText(l) {
@@ -1016,7 +1133,7 @@
         var s = SIDE[e.who];
         if (e.kind === "heal") float(s, "+" + fmt(e.amount) + " " + e.tag, "heal");
         else if (e.kind === "dmg") { float(s, "\u2212" + fmt(e.amount) + " " + e.tag, ""); pulse($(s + "_portrait"), "shake", 300); }
-        else float(s, e.name, "status");
+        else float(s, e.kind === "save" ? "survives!" : e.name, "status");
         li.innerHTML += '<div class="evline">' + eventText(e) + '</div>';
         $("combatlog").scrollTop = $("combatlog").scrollHeight;
       }, k * 180 * f);
@@ -1120,7 +1237,10 @@
         });
       });
     }
-    (s.passive || []).forEach(function (pv) { tags.push("proc: " + pv.kind); });
+    var SHORT = { hit: "on hit", damaged: "when hit", roundStart: "turn start", roundEnd: "turn end", roundCheck: "idle turn",
+                  skillStart: "skill start", skillEnd: "every few casts", hpUnit: "per HP lost", hpBelow: "under half HP", deathSave: "death save" };
+    var seenK = {};
+    (s.passive || []).forEach(function (pv) { var k = SHORT[pv.kind] || pv.kind; if (!seenK[k]) { seenK[k] = 1; tags.push("sim: " + k); } });
     return tags.length ? " &middot; " + tags.join(", ") : "";
   }
   function fillList(q) {
@@ -1150,7 +1270,7 @@
           ? ' &middot; ' + s.ele + (hits > 1 ? ' &middot; ' + hits + ' hits' : '') +
             (cdrow ? ' &middot; CD ' + cdrow : ' &middot; no CD') +
             (s.ec && s.ec.resetCdAtStart ? ' &middot; ready at start' : '')
-          : ' &middot; Charm') + statusTags(s) +
+          : ' &middot; Charm' + (s.unmodelled && !s.passive ? ' &middot; <b>effect not in the sim yet</b>' : '')) + statusTags(s) +
         (on ? ' &middot; <b>equipped &mdash; picking moves it here</b>' : '') + '</span></button>';
     }).join("");
     $("picklist").innerHTML = out || '<p class="pickempty">Nothing matches.</p>';
@@ -1201,12 +1321,11 @@
         if (!v) return;
         var f = PROP2FIELD[prop] || (PROP2RATIO[prop] || [])[0] || PROP2FLAT[prop] || PROP2SCALE[prop];
         var pct = pr[prop].pct || PROP2SCALE[prop];
-        rowsHtml += '<dt>' + (LABEL[f] || prop) + '</dt><dd>+' + (pct ? v.toFixed(1) + '%' : fmt(v)) + '</dd>';
+        rowsHtml += '<dt>' + (LABEL[f] || prop) + (sk.condProps ? ' per stack' : '') + '</dt><dd>+' + (pct ? v.toFixed(1) + '%' : fmt(v)) + '</dd>';
       });
-      (sk.passive || []).forEach(function (pv) {
-        var K = { hit: "on your hits", roundStart: "each turn", damaged: "when hit", roundCheck: "on a turn with no Technique", skillStart: "when a skill starts" };
-        rowsHtml += '<dt>Proc</dt><dd>' + (K[pv.kind] || pv.kind) + (pv.rate < 1 ? ' ' + Math.round(pv.rate * 100) + '%' : '') + '</dd>';
-      });
+      (sk.passive || []).forEach(function (pv) { rowsHtml += '<dt>In the sim</dt><dd class="tt-wrap">' + procLabel(pv, sk) + '</dd>'; });
+      if (sk.unmodelled) rowsHtml += '<dt>Not modelled</dt><dd class="tt-wrap">' + sk.unmodelled.join(", ") + '</dd>';
+      if (!sk.passive && !sk.unmodelled && !rowsHtml) rowsHtml += '<dt>In the sim</dt><dd>nothing beyond its text</dd>';
       if (isCdStartCharm(sk)) rowsHtml += '<dt>At battle start</dt><dd>all Technique CDs ' + cdStartOf([sk]) + '</dd>';
     }
     var st = statusTags(sk).replace(/^ &middot; /, "");
