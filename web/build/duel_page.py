@@ -93,7 +93,27 @@ def render(layout, base_tables, dist: Path, out: Path):
     for c in class_tree:
         c["pre"] = id2name.get(c["pre"], c["pre"]) if c["pre"] else None
 
-    cfg = json.dumps({"ranks": ranks, "minCrit": 1.3, "minBlock": 1.5,
+    # the PvP governor (PVPSkillPropsScaleOnBattleProcessor): its three inputs
+    asr = {int(r[0]): int(r[1]) for r in _b.csvrows("avg_skill_rank")[2:]
+           if len(r) >= 2 and r[0].strip().isdigit()}
+    lnrows = _b.csvrows("level_number")
+    ci = [c.strip() for c in lnrows[0]].index("456")
+    decay = {int(r[0]): float(r[ci]) for r in lnrows[2:]
+             if r and r[0].strip().isdigit() and len(r) > ci and r[ci].strip()}
+    balance = {}
+    for r in _b.csvrows("balance_value")[2:]:
+        if len(r) >= 3 and r[0].strip().isdigit():
+            balance.setdefault(r[1].strip(), {})[int(r[0])] = int(r[2])
+    # Rank enum index for each subrank, as SubRank.ToRank() yields it (None=0, Norank=1, ...)
+    rank_enum = ["None", "Norank", "Blackiron", "Bronze", "Silver", "Gold", "Saint", "Legend", "Angel",
+                 "Godtouched1", "Godtouched2", "Godtouched3", "Demigod1", "Demigod2", "Demigod3"]
+    for L2, e2 in zip(ladder, ranks):
+        base = L2["internal"].rstrip("123").rstrip("_")
+        e2["rankEnum"] = rank_enum.index(base) if base in rank_enum else 0
+    pvpgov = {"minSurvival": 0.10, "defaultBalance": 1.0, "avgSkillRank": asr,
+              "decay": decay, "balance": balance}
+
+    cfg = json.dumps({"ranks": ranks, "minCrit": 1.3, "minBlock": 1.5, "pvp": pvpgov,
                       "speedScale": spd_scale, "v": _b.asset_v(),
                       "rankLabels": sk["rankLabels"], "rankQuality": sk["rankQuality"],
                       "classIcon": class_icon, "classTree": class_tree},
@@ -185,6 +205,8 @@ duels &mdash; or watch one play out action by action on the game's own turn cloc
     <label class="mirror"><input type="checkbox" id="mirror" checked> mirror my sheet onto the opponent</label>
     <label class="mirror">Round cap <input type="number" id="maxrounds" value="15" min="0" max="100" class="short">
       <span class="hint">stages use 15, 20 or 30; 0 = none</span></label>
+    <label class="mirror">Server age <input type="number" id="serverdays" value="150" min="0" max="400" class="short">
+      <span class="hint">days; sets the skill-rank the PvP governor expects</span></label>
     <button type="button" id="reset" class="pickbtn">Reset to defaults</button>
   </div>
 
@@ -245,9 +267,17 @@ each hit reads (Lion Combo is <code>SkillAttack1, SkillAttack1, SkillAttack2</co
 <code>CalcSkillPassiveProps</code>, and the scene says which of their effects it could not use.</p>
 <p><b>It is a PvP fight, and Damage() knows.</b> Damage from a player is divided by the target's
 <code>PlayerSkillDmgReduceScale</code> and again by <code>ProSkillDmgReduceScale</code>, both per-rank bases
-from <code>level_prop_battle_extra</code> &mdash; at Champion III that is &divide;1.14 and &divide;1.31, so
-player damage is roughly halved before anything else. The sheet's PvP Bonus DMG and PvP DMG RES join the
-percentage block, and the few skills with a <code>PvpPropScale</code> under 100% are scaled by it.</p>
+from <code>level_prop_battle_extra</code> &mdash; at Champion III that is &divide;1.14 and &divide;1.31. The sheet's
+PvP Bonus DMG and PvP DMG RES join the percentage block, and the few skills with a <code>PvpPropScale</code>
+under 100% are scaled by it.</p>
+<p><b>Then the governor.</b> <code>PVPSkillPropsScaleOnBattleProcessor</code> multiplies every skill's damage by
+one more factor, the product of three: a <b>survival floor</b> &mdash; each fighter's burst-to-HP ratio,
+<code>ATK&sup2;/(ATK+DEF)/HP</code> carried through crit, block, element and the percentage block, and if the
+lowest one exceeds <code>MinSurvivalRatio</code> (0.10, a full-coefficient hit is worth at most a tenth of a
+health bar) all damage is scaled down to meet it; a <b>skill-rank decay</b> &mdash; the fighters' average skill
+rank against what <code>avg_skill_rank</code> expects for a server of this age, through
+<code>level_number[456]</code>, never above 1; and a <b>balance value</b> from <code>balance_value</code>, which
+only has rows from Saint upward and so is 1.0 below that. This is why real fights run to ten rounds.</p>
 <p><b>Timing is the prefab's.</b> Every hit carries the moment it lands (<code>HitCfg.Delay</code>): Eclipse
 Slash's six cuts fall at 0.3, 0.4, 0.78, 0.9, 1.04 and 1.48 seconds; Divine Wrath's sixteen from 0.85 to 2.24.
 At 1x the scene plays them at that pace.</p>
@@ -265,9 +295,12 @@ for hard controls against a higher-ranked target, and Damp raising the odds of F
 <p><b>Charms with procs</b> now fire: on-hit skills, each-turn skills, when-hit skills (reflect), and the
 turn-with-no-Technique check that Frost Guard uses. Fear, Confusion, Ridicule and Restrict are applied and shown but
 change nothing here &mdash; taunts and movement have no meaning in a 1v1 without a grid.</p>
-<p><b>Modelled, not extracted:</b> which skill to cast. The prefab lists the AI's tie-break priorities, but the
-choice itself runs in an ECS behaviour tree that is not in the config, so each side casts the first ready
-Technique in slot order. There is no grid, so range, area and positioning do nothing.</p>
+<p><b>A turn casts every Technique that is ready.</b> Each goes in slot order and then onto its own cooldown,
+counted in that caster's turns &mdash; so a skill with no cooldown fires every turn, a CD&nbsp;1 skill every other,
+and a turn with three ready skills is three casts. A basic attack happens only when nothing is ready, which is
+also when Charms like Frost Guard that key off a Technique-less turn fire. Blind is spent by the first attack of
+the turn. The prefab lists the AI's tie-break priorities for <i>targets</i>, but there is no grid here, so
+range, area and positioning do nothing.</p>
 </div>
 </div>
 <script type="application/json" id="dueldata">{cfg}</script>

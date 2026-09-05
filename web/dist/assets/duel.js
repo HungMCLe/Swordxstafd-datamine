@@ -203,6 +203,52 @@
     return Math.max(0, rate);
   }
 
+  /* PVPSkillPropsScaleOnBattleProcessor: the final scale on every skill hit in a PvP fight */
+  function pvpGovernor(A, B, loadA, loadB) {
+    var G = C.pvp; if (!G) return { scale: 1, parts: {} };
+    /* 1. survival floor: the lowest burst-to-HP ratio, held to MinSurvivalRatio */
+    var sheets = [A, B];
+    var minBlockAvoid = Math.min.apply(null, sheets.map(function (s) { return s.acc / s.rank.BaseBlockAvoidPercentValue; }));
+    var minCritAvoid = Math.min.apply(null, sheets.map(function (s) { return s.critres; }));
+    var ratio = Math.min.apply(null, sheets.map(function (s) {
+      var p = Math.min(1, Math.max(0, 0.05 + s.cr - minCritAvoid));
+      var m = Math.max(s.cd - minCritAvoid, 1.3);
+      var b = Math.min(1, Math.max(0, s.blockrate - minBlockAvoid));
+      var bv = Math.max(s.blockeff - minBlockAvoid, 1.5);
+      var r = s.atk * s.atk / (s.atk + s.def) / s.hp;
+      r *= 1 - p + p * m;
+      r /= 1 - b + b * bv;
+      var addTerm = s.aff / s.rank.BaseElementAdd, redTerm = s.aegis / s.rank.BaseElementReduce;
+      var mast = (s.kfm / s.rank.BaseKongFuMaster + s.mast / s.rank.BaseElementMaster) / 2;
+      var res = (0 / s.rank.BaseKongFuResistance + s.eres / s.rank.BaseElementResistance) / 2;
+      r *= (1 + addTerm + mast) / (1 + redTerm + res);
+      r *= (1 + s.boost + s.pvpadd) / (1 + s.dmgres + s.pvpres);
+      return r;
+    }));
+    var survival = ratio > G.minSurvival ? G.minSurvival / ratio : 1;
+    /* 2. skill-rank decay: the fight's average skill rank against the server's expected one */
+    function avgRank(load) {
+      var rs = load.filter(Boolean).map(function () { return 0; });
+      return rs.length ? 0 : 0;
+    }
+    var mine = A.srank, theirs = B.srank;                /* every equipped skill shares the side's rank */
+    var fightRank = Math.round((Math.max(mine, 0) + Math.max(theirs, 0)) / 2);
+    var days = Math.max(0, Math.round(n("serverdays")));
+    var keys = Object.keys(G.avgSkillRank).map(Number).sort(function (a, b) { return a - b; });
+    var serverRank = G.avgSkillRank[String(Math.min(days, keys[keys.length - 1]))] || G.avgSkillRank[String(keys[keys.length - 1])];
+    var dFight = G.decay[String(fightRank)] || 0, dServer = G.decay[String(serverRank)] || 0;
+    var rankScale = dFight > 0 ? Math.min(1, dServer / dFight) : 1;
+    /* 3. balance value by level and rank enum; rows only exist from Saint up */
+    var bal = sheets.map(function (s) {
+      var row = G.balance[String(s.rank.rankEnum)];
+      var v = row && row[String(s.slevel)];
+      return v ? v / 10000 : G.defaultBalance;
+    });
+    var balance = (bal[0] + bal[1]) / 2;
+    return { scale: survival * rankScale * balance,
+             parts: { survival: survival, ratio: ratio, rankScale: rankScale, fightRank: fightRank, serverRank: serverRank, balance: balance } };
+  }
+
   var BASIC = { id: 0, name: "Basic attack", ele: "Physical", hits: 1, r: {} };
 
   /* the size of a shield status, from its entity_prop_status row */
@@ -296,7 +342,8 @@
   }
 
   /* ---------- the fight ---------- */
-  function oneFight(A, B, loadA, loadB, rng, wantLog, maxRounds) {
+  function oneFight(A, B, loadA, loadB, rng, wantLog, maxRounds, gov) {
+    var GOV = gov || 1;
     function side(S, load, idx) {
       var techs = load.slice(0, TECH);
       return {
@@ -368,7 +415,7 @@
       var total = 0, fallCount = 0;
       var blind = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
       parts.hits.forEach(function (h) {
-        var d = h.d, crit = false, block = false, absorbed = 0, blinded = false;
+        var d = h.d * GOV, crit = false, block = false, absorbed = 0, blinded = false;
         var fo = null;
         h.on.forEach(function (o) { var mt = DATA.statuses[String(o.status)]; if (mt && mt.falloff) fo = mt.falloff; });
         if (fo) {
@@ -438,19 +485,9 @@
       var frozenCd = me.st.some(function (x) { return x.meta.cdFreeze; });
       if (!frozenCd) for (var c = 0; c < me.cd.length; c++) if (me.cd[c] > 0) me.cd[c]--;
 
-      var pick = null, slot = -1, rolled = [], total = 0, usedTech = false;
-      if (skip) {
-        if (wantLog) log.push(entry(me, null, -1, [], 0, events, skip.meta.action));
-      } else {
-        for (var k = 0; k < me.load.length; k++) {
-          var cand = me.load[k];
-          if (!cand || me.cd[k] !== 0) continue;
-          var lim = cand.ec ? cand.ec.limitedTimes : -1;
-          if (lim > 0 && me.uses[k] >= lim) continue;
-          if (redundant(cand, me, foe)) continue;
-          pick = cand; slot = k; break;
-        }
-        if (!pick) pick = BASIC; else usedTech = true;
+      /* one cast: hits, rolls, statuses, procs; returns what the log needs */
+      function cast(pick, slot) {
+        var rolled = [], total = 0;
         var meE = eff(me, sides), foeE = eff(foe, sides);
         meE.hpMax = me.s.hp; foeE.hpMax = foe.s.hp;
         var rows = pick.id === 0 ? {} : (pick.r[String(me.s.srank)] || {});
@@ -462,7 +499,6 @@
           if (events) events.push({ kind: "heal", who: me.idx, amount: me.hp - before, tag: pick.name });
         }
         if (parts.hits.length && target === foe) total = landHits(parts, me, foe, meE, foeE, pick, rolled);
-        /* statuses the hits carry (shields go on the caster's side when the skill targets self) */
         parts.hits.forEach(function (h, hi) {
           if (rolled[hi] && rolled[hi].blinded) return;
           h.on.forEach(function (o) {
@@ -470,7 +506,6 @@
             if (!meta || meta.falloff) return;
             var tgt = (o.target === "DamageTarget" && target === foe) ? foe : me;
             var chance = landChance(o.chance, o.byProp, meta.type, meE, foeE);
-            /* Damp and the like raise the odds of the action they name */
             tgt.st.forEach(function (x) {
               var bo = x.meta.boosts;
               if (bo && bo.actions.indexOf(meta.action) >= 0 && x.meta.props) {
@@ -488,10 +523,9 @@
             }
           });
         });
-        /* Blind is spent by the next attack skill */
+        /* Blind is spent by the first attack skill of the turn */
         var bl = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
         if (bl && isAttack) removeStatus(me, bl);
-        /* charm procs: mine on hit, theirs on being hit */
         if (total > 0) {
           me.charms.forEach(function (ch) {
             (ch && ch.passive || []).forEach(function (pv) {
@@ -511,23 +545,44 @@
           });
         }
         if (slot >= 0) { me.cd[slot] = cdOf(pick, me.s.srank); me.uses[slot]++; }
-        /* round-check charms: fire when no Technique was used this turn (Frost Guard) */
-        if (!usedTech) {
+        return { rolled: rolled, total: total };
+      }
+
+      var casts = 0, sub = 0;
+      if (skip) {
+        if (wantLog) log.push(entry(me, null, -1, [], 0, events, skip.meta.action, 0));
+      } else {
+        /* every Technique that is ready goes, in slot order, each onto its own cooldown */
+        for (var k = 0; k < me.load.length && foe.hp > 0 && me.hp > 0; k++) {
+          var cand = me.load[k];
+          if (!cand || me.cd[k] !== 0) continue;
+          var lim = cand.ec ? cand.ec.limitedTimes : -1;
+          if (lim > 0 && me.uses[k] >= lim) continue;
+          if (redundant(cand, me, foe)) continue;
+          events = wantLog ? [] : null;
+          var r = cast(cand, k);
+          casts++;
+          if (wantLog) log.push(entry(me, cand, k, r.rolled, r.total, events, null, sub++));
+        }
+        if (casts === 0) {
+          /* nothing ready: a basic attack, and the Charms that key off a Technique-less turn */
+          events = wantLog ? [] : null;
+          var rb = cast(BASIC, -1);
           me.charms.forEach(function (ch) {
             (ch && ch.passive || []).forEach(function (pv) {
               if (pv.kind !== "roundCheck") return;
               pv.triggers.forEach(function (t) { if (rng() < pv.rate * t.chance) fireSkill(t.skill, me, me, ch.name); });
             });
           });
+          if (wantLog) log.push(entry(me, BASIC, -1, rb.rolled, rb.total, events, null, 0));
         }
-        if (wantLog) log.push(entry(me, pick, slot, rolled, total, events, null));
       }
       tickEnd(me);
       me.t += interval(eff(me, sides));
     }
-    function entry(me, pick, slot, rolled, total, ev, note) {
+    function entry(me, pick, slot, rolled, total, ev, note, sub) {
       var foe = sides[1 - me.idx];
-      return { t: Math.round(me.t), side: me.idx, who: WHO[me.idx], slot: slot,
+      return { t: Math.round(me.t), side: me.idx, who: WHO[me.idx], slot: slot, sub: sub || 0,
                skill: pick ? pick.name : (note === "start" ? "—" : note + " — no action"),
                skillId: pick ? pick.id : 0, ele: pick ? pick.ele : "None", hits: rolled, dmg: total,
                dur: pick && pick.ec && pick.ec.dur ? pick.ec.dur : 0.8,
@@ -558,7 +613,7 @@
   }
 
   /* ---------- the run ---------- */
-  var PLAY = null;
+  var PLAY = null, PLAYGOV = null;
 
   function currentSheets() {
     var A = sheet("a"), B;
@@ -574,12 +629,14 @@
     var cs = currentSheets(), A = cs.A, B = cs.B;
     var N = 1000, winA = 0, draws = 0, turnList = [], rng = mulberry(12345);
     var maxR = parseInt(($("maxrounds") || {}).value, 10) || 0;
+    var gov = pvpGovernor(A, B, cs.loadA, cs.loadB);
+    PLAYGOV = gov;
     for (var i = 0; i < N; i++) {
-      var r = oneFight(A, B, cs.loadA, cs.loadB, rng, false, maxR);
+      var r = oneFight(A, B, cs.loadA, cs.loadB, rng, false, maxR, gov.scale);
       if (r.winner === 0) winA++; else if (r.winner < 0) draws++;
       turnList.push(r.turns);
     }
-    var sample = oneFight(A, B, cs.loadA, cs.loadB, mulberry(999), true, maxR);
+    var sample = oneFight(A, B, cs.loadA, cs.loadB, mulberry(999), true, maxR, gov.scale);
     PLAY = { A: A, B: B, sample: sample, i: 0, timer: null };
     turnList.sort(function (x, y) { return x - y; });
     var med = turnList[Math.floor(turnList.length / 2)];
@@ -591,9 +648,13 @@
     $("oddsb").textContent = pb >= 0.08 ? (pb * 100).toFixed(0) + "% Opponent" : "";
     $("oddstext").innerHTML = "<b>You win " + (pa * 100).toFixed(1) + "%</b> of 1,000 duels" +
       (draws ? ", " + (draws / N * 100).toFixed(1) + "% hit the round cap with both alive" : "") +
-      ". Median fight length <b>" + med + " actions</b>. Your interval is <b>" +
+      ". Median fight length <b>" + med + " turns</b>, " + sample.log.length + " casts in the one shown. Your interval is <b>" +
       Math.round(interval(A)) + "</b> against theirs of <b>" + Math.round(interval(B)) +
-      "</b>, so you act " + (interval(B) / interval(A)).toFixed(2) + "x as often.";
+      "</b>, so you act " + (interval(B) / interval(A)).toFixed(2) + "x as often." +
+      (gov.scale < 0.999 ? " The PvP governor scales all skill damage by <b>" + gov.scale.toFixed(2) + "x</b>" +
+        " (survival floor " + gov.parts.survival.toFixed(2) + " from a burst ratio of " + gov.parts.ratio.toFixed(2) +
+        ", skill-rank decay " + gov.parts.rankScale.toFixed(2) + " for rank " + gov.parts.fightRank + " against a server average of " +
+        gov.parts.serverRank + ", balance " + gov.parts.balance.toFixed(2) + ")." : " The PvP governor leaves damage at 1.00x.");
     var rows = sample.log.map(function (l) {
       var hits = l.hits.map(function (h) { return h.blinded ? "x" : h.block ? "B" : (h.crit ? "C" : "·"); }).join("");
       var ev = l.events.map(function (e) {
@@ -871,7 +932,8 @@
     return '<span class="ev st">\u2726 ' + e.name + ' on ' + WHO[e.who] + '</span>';
   }
   function headText(l) {
-    return '<span class="who ' + SIDE[l.side] + '">' + l.who + '</span> <span class="tn">turn ' + l.turn + '</span> \u2014 <b>' +
+    return '<span class="who ' + SIDE[l.side] + '">' + l.who + '</span> <span class="tn">turn ' + l.turn +
+      (l.sub ? ' \u00b7 cast ' + (l.sub + 1) : '') + '</span> \u2014 <b>' +
       (l.note && l.note !== "start" ? l.note + ', no action' : l.skill) + '</b>';
   }
   function sumText(l) {
@@ -887,8 +949,8 @@
     var sh = { a: prev ? prev.shA : 0, b: prev ? prev.shB : 0 };
     var max = { a: PLAY.A.hp, b: PLAY.B.hp };
     document.querySelectorAll(".slot.acting").forEach(function (e) { e.classList.remove("acting"); });
-    ribbon("Turn " + l.turn + " \u00b7 " + l.who, me);
-    var li = logLine(headText(l), "turn " + me);
+    if (!l.sub) ribbon("Turn " + l.turn + " \u00b7 " + l.who, me);
+    var li = logLine(headText(l), "turn " + me + (l.sub ? " cont" : ""));
     if (l.note && l.note !== "start") {
       $(me + "_callout").innerHTML = '<span class="ctl">' + l.note + '</span><small>turn ' + l.turn + '</small>';
       pulse($(me + "_portrait"), "stunned", 600 * f + 200);
