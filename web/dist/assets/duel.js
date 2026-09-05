@@ -315,12 +315,17 @@
   }
   function isCdStartCharm(ch) { return cdStartOf([ch]) !== 0; }
 
+  /* FightSkillData: ready when Round - LastRound > CD. In countdown terms a skill
+     waits CD + 1 turns after a cast (CD 1 = out for one full turn), starts the
+     fight at CD + 1 unless it is ResetCDAtStart, and a Rapid Cast cut comes off
+     that opening count. The count ticks at the start of each of its owner's turns
+     and the skill is castable at 0. */
   function openingCds(techs, charms, srank) {
     var cut = cdStartOf(charms);
     return techs.map(function (sk) {
       if (!sk) return 0;
       if (sk.ec && sk.ec.resetCdAtStart) return 0;
-      return Math.max(0, cdOf(sk, srank) + cut);
+      return Math.max(0, cdOf(sk, srank) + 1 + cut);
     });
   }
 
@@ -495,7 +500,7 @@
         var isAttack = !pick.ec || pick.ec.skillType === "Attack" || pick.id === 0;
         var target = (pick.ec && (pick.ec.target === "Ally" || pick.ec.target === "Me" || pick.ec.target === "Self")) ? me : foe;
         if (parts.heal) {
-          var before = me.hp; me.hp = Math.min(me.s.hp, me.hp + parts.heal);
+          var before = me.hp; me.hp = Math.min(me.s.hp, me.hp + parts.heal * GOV);
           if (events) events.push({ kind: "heal", who: me.idx, amount: me.hp - before, tag: pick.name });
         }
         if (parts.hits.length && target === foe) total = landHits(parts, me, foe, meE, foeE, pick, rolled);
@@ -516,7 +521,7 @@
             if (rng() < chance) {
               var st = applyStatus(tgt, o.status, me.idx);
               if (st && meta.shield) {
-                var amt = shieldSize(meta, me, tgt);
+                var amt = shieldSize(meta, me, tgt) * GOV;
                 if (amt > 0) tgt.shield = Math.max(tgt.shield, amt);
               }
               if (st && events) events.push({ kind: "status", who: tgt.idx, name: statusName(meta) });
@@ -544,7 +549,7 @@
             });
           });
         }
-        if (slot >= 0) { me.cd[slot] = cdOf(pick, me.s.srank); me.uses[slot]++; }
+        if (slot >= 0) { me.cd[slot] = cdOf(pick, me.s.srank) + 1; me.uses[slot]++; }
         return { rolled: rolled, total: total };
       }
 
@@ -869,7 +874,7 @@
     for (var k = 0; k < TECH; k++) {
       var el = $(side + "_slot" + k), ov = el.querySelector(".cdov");
       if (!ov) continue;
-      var v = cd ? cd[k] : 0;
+      var v = cd ? Math.max(0, cd[k] - 1) : 0;
       ov.hidden = !v; ov.textContent = v || "";
       el.classList.toggle("cooling", !!v);
     }
@@ -1311,14 +1316,23 @@
     DATA = v[0]; CURVES = v[1];
     DATA.statuses = DATA.statuses || {}; DATA.trig = DATA.trig || {};
     boot();
-    /* an Archmage-line kit that trades blows for a while: Divine Wrath at this
-       rank is a near one-shot even after the PvP halving, so it is left for the
-       picker rather than the opening demo */
-    var names = ["Aqua Vortex", "Howling Hurricane", "Fire Blast", "Meteoric Flames",
-                 "Rapid Cast", "Frost Guard", "Incarnation of Light", "Radiant Sear"];
-    names.forEach(function (nm, i) {
-      var s = DATA.skills.filter(function (x) { return x.name === nm; })[0];
-      if (s) { LOAD.a[i] = s; LOAD.b[i] = s; }
+    /* the opening matchup: an Archmage against a Berserker, each with a kit from
+       its own line and its line's sheet. Both kits carry the same cooldown
+       pattern (2, 1, 1, none) so the turn rhythm is easy to follow. Divine Wrath
+       at this rank is a near one-shot even after the PvP scaling, so it is left
+       for the picker rather than the opening demo */
+    var KITS = {
+      a: ["Aqua Vortex", "Howling Hurricane", "Fire Blast", "Meteoric Flames",
+          "Rapid Cast", "Frost Guard", "Incarnation of Light", "Radiant Sear"],
+      b: ["Heavy Impact", "Quadrant Slash", "Leap Attack", "Edge Strike",
+          "Blade Siphon", "Soulfire Protection", "Blade Tempest", "Insightful Eye"]
+    };
+    SIDE.forEach(function (side) {
+      KITS[side].forEach(function (nm, i) {
+        var s = DATA.skills.filter(function (x) { return x.name === nm; })[0];
+        if (s) LOAD[side][i] = s;
+      });
+      applyDefaults(side);
     });
     paintAll();
     invalidate();
