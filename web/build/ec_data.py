@@ -177,21 +177,104 @@ PASSIVE_KINDS = {"FightStatusHitSkillComponent": "hit",
                  "FightStatusSkillStartComponent": "skillStart"}
 
 
-def charm_passive(status_ids):
+def _status_cfgs(cfgs):
     out = []
+    for c in cfgs or []:
+        if not c or not c.get("StatusId"):
+            continue
+        out.append({"status": c["StatusId"], "chance": c.get("BasePercent", 1.0),
+                    "target": c.get("ApplyTarget") or c.get("TargetType") or "Applicator"})
+    return out
+
+
+def _direct_skill(info):
+    """Some components name their skill straight on the component (Counter Blade's
+    FightStatusDamageSkillComponent.SkillId = 11210) rather than in a cfg list."""
+    sid = info.get("SkillId")
+    return [{"skill": sid, "chance": 1.0, "byProp": False, "target": "TriggerSource",
+             "source": "Applicator"}] if sid else []
+
+
+# components every status carries, or that the sheet already covers (the always-on props)
+BOILERPLATE = {"ActionComponent", "FightStatusComponent", "FightStatusPropComponent", "FightStatusStartComponent"}
+
+
+def _human(cname):
+    return re.sub(r"([a-z])([A-Z])", r"\1 \2", cname.replace("FightStatus", "").replace("Component", "")).lower()
+
+
+def charm_passive(status_ids):
+    """The behaviours a Charm's passive statuses carry, as the simulator's trigger
+    kinds, plus the component types it has no model for, so the page can say so.
+
+    Kinds: hit / damaged / roundStart / roundEnd / roundCheck / skillStart fire
+    skills and apply statuses; skillEnd applies a status every N Techniques
+    (Blazing Clash); hpUnit applies one per UnitHpPer of max HP lost (Frame of
+    Battles); hpBelow fires when HP crosses under a fraction (Pure Protection);
+    deathSave floors a lethal hit (Indomitable Will). A hit status that carries a
+    StatusStackCountComponent pays out at that count with the Charm's own
+    numbers (Blade of Judgment's Mark)."""
+    out, unmodelled = [], []
     for pid in status_ids:
         cs = comps(pid)
-        for cname, kind in PASSIVE_KINDS.items():
-            info = cs.get(cname)
-            if not info:
+        for cname, info in cs.items():
+            if cname in BOILERPLATE:
                 continue
-            trig = _trigger_cfgs(info.get("TriggerSkillCfgs") or info.get("SkillCfgs") or info.get("StatusTriggerSkillCfgs"))
-            if not trig:
-                continue
-            out.append({"kind": kind, "status": pid, "rate": info.get("Rate", 1.0),
-                        "maxCount": info.get("MaxCount", info.get("MaxInvokeCount", -1)),
-                        "onlyAttack": info.get("OnlySkillType") == "Attack", "triggers": trig})
-    return out
+            kind = PASSIVE_KINDS.get(cname)
+            base = {"status": pid, "rate": info.get("Rate", 1.0),
+                    "maxCount": info.get("MaxCount", info.get("MaxInvokeCount", -1)),
+                    "onlyAttack": info.get("OnlySkillType") == "Attack"}
+            if kind:
+                trig = _trigger_cfgs(info.get("TriggerSkillCfgs") or info.get("SkillCfgs")
+                                     or info.get("StatusTriggerSkillCfgs")) + _direct_skill(info)
+                sts = _status_cfgs(info.get("StatusCfgs") or info.get("TriggerStatusCfgs"))
+                if not trig and not sts:
+                    unmodelled.append(_human(cname))
+                    continue
+                pv = dict(base, kind=kind, triggers=trig, statuses=sts)
+                for st in sts:
+                    scc = comp(st["status"], "StatusStackCountComponent")
+                    if scc and scc.get("StackCount"):
+                        pv["stackTrigger"] = {"status": st["status"], "count": scc["StackCount"]}
+                out.append(pv)
+            elif cname == "FightStatusRoundEndComponent":
+                trig = _trigger_cfgs(info.get("TriggerSkillCfgs"))
+                sts = _status_cfgs(info.get("TriggerStatusCfgs"))
+                if trig or sts:
+                    out.append(dict(base, kind="roundEnd", rate=1.0, triggers=trig, statuses=sts))
+                else:
+                    unmodelled.append(_human(cname))
+            elif cname == "FightStatusSkillEndComponent" and info.get("StatusEntClassId"):
+                out.append(dict(base, kind="skillEnd", rate=1.0, every=info.get("MetCount") or 1, triggers=[],
+                                statuses=[{"status": info["StatusEntClassId"], "chance": 1.0, "target": "Applicator"}]))
+            elif cname == "FightStatusHpDecreaseUnitComponent":
+                sts = _status_cfgs(info.get("StatusList"))
+                trig = _trigger_cfgs(info.get("Skills"))
+                if sts or trig:
+                    out.append(dict(base, kind="hpUnit", rate=1.0, unit=info.get("UnitHpPer") or 0.15,
+                                    triggers=trig, statuses=sts))
+                else:
+                    unmodelled.append(_human(cname))
+            elif cname == "FightStatusHpLessThanComponent":
+                sts = [{"status": x, "chance": 1.0, "target": "Applicator"} for x in (info.get("StatusList") or []) if x]
+                sts += _status_cfgs(info.get("StatusCfgs"))
+                trig = _trigger_cfgs(info.get("SkillCfgs")) + _direct_skill(info)
+                if sts or trig:
+                    out.append(dict(base, kind="hpBelow", rate=1.0, pct=info.get("HpLessThanPercentage") or 0.5,
+                                    triggers=trig, statuses=sts))
+                else:
+                    unmodelled.append(_human(cname))
+            elif cname == "FightStatusHpLimitComponent":
+                # LowerLimit and MaxCount are "replaceable entry parameters"
+                # (ConfigLowerLimit / ConfigMaxCount) and decode as defaults here;
+                # the card says 1 HP, the first time
+                out.append(dict(base, kind="deathSave", rate=1.0, maxCount=info.get("MaxCount") or 1,
+                                limit=info.get("LowerLimit") or 1,
+                                triggers=_trigger_cfgs(info.get("SkillList")),
+                                statuses=_status_cfgs(info.get("StatusList"))))
+            else:
+                unmodelled.append(_human(cname))
+    return out, sorted(set(unmodelled))
 
 
 # ---------------------------------------------------------------- driver
@@ -292,12 +375,20 @@ def enrich(duel, SD):
             note_hits(ec["hits"])
         if s["kind"] == "Charm":
             ids = [int(x) for x in re.findall(r"\d+", row.get("PassiveStatusIdList") or "")]
-            pas = charm_passive(ids)
+            pas, unmod = charm_passive(ids)
             if pas:
                 s["passive"] = pas
                 for p in pas:
                     for t in p["triggers"]:
                         pending_skill.add(t["skill"])
+                    for o in p.get("statuses", []):
+                        pending_status.add(o["status"])
+                # a Charm whose numbers belong to the status or the strike it
+                # produces, not to the standing sheet
+                if any(p["kind"] in ("skillEnd", "hpUnit", "hpBelow", "deathSave") or p.get("stackTrigger") for p in pas):
+                    s["condProps"] = True
+            if unmod:
+                s["unmodelled"] = unmod
 
     # trigger skills can apply statuses, whose triggers can fire skills: close over both
     seen_skill = set()

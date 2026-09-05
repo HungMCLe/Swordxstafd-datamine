@@ -285,6 +285,14 @@ health bar) all damage is scaled down to meet it; a <b>skill-rank decay</b> &mda
 rank against what <code>avg_skill_rank</code> expects for a server of this age, through
 <code>level_number[456]</code>, never above 1; and a <b>balance value</b> from <code>balance_value</code>, which
 only has rows from Saint upward and so is 1.0 below that. This is why real fights run to ten rounds.</p>
+<p><b>What a Charm does comes from its passive status.</b> Each Charm equips one or more passive status
+entities, and the components on them are the effect: a skill fired on your hits, when you are hit, at the start or
+end of your turns or on a turn with no Technique (Blade Siphon, Counter Blade, Frost Guard); a status applied every
+so many Techniques (Blazing Clash), per 15% of HP lost (Frame of Battles) or when HP drops under a fraction (Pure
+Protection); a Mark that pays out at ten stacks with the Charm's own damage (Blade of Judgment); a lethal hit floored
+at 1 HP once, with the heal on the card (Indomitable Will). The sim runs all of those. Component types it has no model
+for yet &mdash; summons, grid range, kill triggers, revival, damage-process hooks &mdash; are named on the Charm's
+hover card and in the note under the odds, so a Charm never silently does nothing.</p>
 <p><b>Timing is the prefab's.</b> Every hit carries the moment it lands (<code>HitCfg.Delay</code>): Eclipse
 Slash's six cuts fall at 0.3, 0.4, 0.78, 0.9, 1.04 and 1.48 seconds; Divine Wrath's sixteen from 0.85 to 2.24.
 At 1x the scene plays them at that pace.</p>
