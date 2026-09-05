@@ -1302,8 +1302,8 @@
     });
     $("a_cls").addEventListener("change", function () { reclass("a"); });
     $("b_cls").addEventListener("change", function () { reclass("b"); });
-    document.querySelector('.fighter[data-side="b"]').classList.add("dimmed");
-    document.querySelector('.duelstats details:nth-of-type(2)').classList.add("dimmed");
+    document.querySelector('.fighter[data-side="b"]').classList.toggle("dimmed", $("mirror").checked);
+    document.querySelector('.duelstats details:nth-of-type(2)').classList.toggle("dimmed", $("mirror").checked);
     document.querySelectorAll(".duelstats input, .duelstats select").forEach(function (el) {
       el.addEventListener("change", function () { paintAll(); invalidate(); });
     });
