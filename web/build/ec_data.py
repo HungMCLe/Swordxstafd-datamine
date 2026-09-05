@@ -68,12 +68,14 @@ def _trigger_cfgs(cfgs):
 
 
 # ---------------------------------------------------------------- hits
-def walk_hits(hitlist, out, depth=0):
-    """Flatten a skill's hit tree into one entry per landed hit, in order."""
+def walk_hits(hitlist, out, depth=0, t0=0.0):
+    """Flatten a skill's hit tree into one entry per landed hit, in order, each
+    stamped with the moment it lands (HitCfg.Delay, seconds from the cast)."""
     if depth > 4:
         return
     for h in hitlist or []:
         hid = h.get("ClassId")
+        at = round(t0 + float(h.get("Delay") or 0.0), 3)
         cs = comps(hid)
         hitc = None
         for name, info in cs.items():
@@ -84,7 +86,7 @@ def walk_hits(hitlist, out, depth=0):
             continue
         name, info = hitc
         if info.get("HitList"):                       # random-target fan-out: the sub-hits are the hits
-            walk_hits(info["HitList"], out, depth + 1)
+            walk_hits(info["HitList"], out, depth + 1, at)
             continue
         dmg = comp(info.get("DamageId"), "FightDamageComponent") or {}
         on = [{"status": s["StatusId"], "chance": s.get("BasePercent", 1.0),
@@ -92,7 +94,7 @@ def walk_hits(hitlist, out, depth=0):
               for s in (dmg.get("StatusList") or []) if s.get("StatusId")]
         out.append({"prop": info.get("DamageProp"), "fixed": info.get("FixedDamageProp"),
                     "type": info.get("DamageType"), "kind": name.replace("Fight", "").replace("Component", ""),
-                    "scope": len(info.get("Scope") or []), "on": on,
+                    "scope": len(info.get("Scope") or []), "on": on, "at": at,
                     "true": bool(info.get("IsTrueDamage")), "ignoreShield": bool(info.get("DamageIgnoreShield"))})
 
 
@@ -103,8 +105,11 @@ def skill_ec(ec_entity_id):
     hits = []
     walk_hits(fsc.get("HitList"), hits)
     ai = (fsc.get("Ai") or {}).get("AiPriorityTypes") or []
+    # how long the cast takes on screen: the prefab's own duration, else the last hit plus a beat
+    dur = max(float(fsc.get("Duration") or 0), float(fsc.get("ActionDuration") or 0),
+              (max([h["at"] for h in hits]) + 0.4) if hits else 0.8)
     return {"ele": fsc.get("ElementType") or "None", "skillType": fsc.get("SkillType"),
-            "target": fsc.get("TargetType"), "hits": hits,
+            "target": fsc.get("TargetType"), "hits": hits, "dur": round(dur, 2),
             "resetCdAtStart": bool(fsc.get("ResetCDAtStart")),
             "limitedTimes": fsc.get("LimitedTimes", -1), "aiPriority": ai,
             "needCondition": bool(fsc.get("NeedConditionStatusMeetToRelease"))}
@@ -302,8 +307,12 @@ def enrich(duel, SD):
             skrow = skills_cfg.get(sk)
             eid = int(skrow["EcEntityId"]) if skrow and skrow.get("EcEntityId") else sk
             ec = skill_ec(eid)
+            try:
+                pvp = int(((SD.eps.get(eid) or {}).get("PvpPropScale") or "10000").strip() or 10000)
+            except Exception:
+                pvp = 10000
             entry = {"id": sk, "name": (SD.L(f"item_{sk}_name") if skrow else None) or f"skill {sk}",
-                     "r": skill_rows(eid), "ec": ec}
+                     "r": skill_rows(eid), "ec": ec, "pvp": pvp}
             if ec:
                 note_hits(ec["hits"])
             trig[str(sk)] = entry

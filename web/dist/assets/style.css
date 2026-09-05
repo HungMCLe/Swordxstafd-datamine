@@ -578,3 +578,59 @@ table.log td.mono{font:500 12px var(--mono);letter-spacing:.08em;color:var(--mut
 
 select.fclass{font:600 13px var(--body);padding:4px 8px;border-radius:7px;background:var(--raised);color:var(--ink);border:1px solid var(--line);cursor:pointer;max-width:12em}
 select.fclass:disabled{opacity:.7;cursor:default}
+
+/* ---------- duel: playback motion and the combat log ---------- */
+.ribbon{position:absolute;left:50%;top:58px;transform:translate(-50%,-6px);z-index:4;padding:6px 18px;
+  border-radius:999px;font:700 12px var(--body);letter-spacing:.14em;text-transform:uppercase;color:#fff;
+  background:var(--ink);box-shadow:0 6px 18px rgba(0,0,0,.25);opacity:0;pointer-events:none}
+.ribbon.a{background:linear-gradient(135deg,#8a6220,#b8863b)}
+.ribbon.b{background:linear-gradient(135deg,#2c4f7c,#3d6ea8)}
+.ribbon.in{animation:ribbonin .45s ease-out forwards}
+@keyframes ribbonin{0%{opacity:0;transform:translate(-50%,-10px) scale(.92)}
+  25%{opacity:1;transform:translate(-50%,0) scale(1.04)}100%{opacity:1;transform:translate(-50%,0) scale(1)}}
+
+.medallion{transition:transform .18s ease}
+.medallion.lunge-a{animation:lungeR .5s cubic-bezier(.2,.8,.3,1)}
+.medallion.lunge-b{animation:lungeL .5s cubic-bezier(.2,.8,.3,1)}
+@keyframes lungeR{0%{transform:translateX(0)}35%{transform:translateX(26px) scale(1.06)}100%{transform:translateX(0)}}
+@keyframes lungeL{0%{transform:translateX(0)}35%{transform:translateX(-26px) scale(1.06)}100%{transform:translateX(0)}}
+@media (max-width:760px){
+  .medallion.lunge-a{animation-name:lungeDown} .medallion.lunge-b{animation-name:lungeUp}
+  @keyframes lungeDown{0%{transform:none}35%{transform:translateY(16px) scale(1.06)}100%{transform:none}}
+  @keyframes lungeUp{0%{transform:none}35%{transform:translateY(-16px) scale(1.06)}100%{transform:none}}
+}
+.medallion.shake{animation:shake .32s ease-in-out}
+.medallion.shake.hard{animation:shakeHard .34s ease-in-out}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(6px)}
+  60%{transform:translateX(-4px)}80%{transform:translateX(3px)}}
+@keyframes shakeHard{0%,100%{transform:translate(0,0)}15%{transform:translate(-11px,2px) rotate(-2deg)}
+  35%{transform:translate(9px,-2px) rotate(2deg)}55%{transform:translate(-6px,1px)}75%{transform:translate(4px,-1px)}}
+.medallion.stunned{filter:grayscale(.8) brightness(.8);animation:wobble .6s ease-in-out}
+@keyframes wobble{0%,100%{transform:rotate(0)}25%{transform:rotate(-4deg)}75%{transform:rotate(4deg)}}
+.arena.flash{animation:flash .22s ease-out}
+@keyframes flash{0%{box-shadow:0 0 0 0 rgba(184,134,59,0)}30%{box-shadow:inset 0 0 0 3px rgba(184,134,59,.55)}100%{box-shadow:var(--shadow)}}
+.hpfill{transition:width .3s ease}
+
+.logwrap{margin:6px 0 22px}
+.logwrap h3{margin-top:0}
+.combatlog{list-style:none;margin:0;padding:0;max-height:420px;overflow-y:auto;border:1px solid var(--line);
+  border-radius:11px;background:var(--surface);font-size:13.5px}
+.combatlog li{padding:9px 14px;border-bottom:1px solid var(--line);max-width:none}
+.combatlog li:last-child{border-bottom:0}
+.combatlog li.turn{background:var(--surface)}
+.combatlog li.turn.a{border-left:3px solid var(--gold-rail)}
+.combatlog li.turn.b{border-left:3px solid var(--blue-rail)}
+.combatlog li.end{background:var(--raised);text-align:center;font-size:14px}
+.combatlog .who{font-weight:700}
+.combatlog .who.a{color:var(--gold)} .combatlog .who.b{color:var(--blue)}
+.combatlog .tn{font:600 11px var(--mono);color:var(--faint);letter-spacing:.06em;text-transform:uppercase;margin:0 4px}
+.combatlog .hits{margin-top:4px;font:500 12.5px var(--mono);color:var(--muted);line-height:1.7}
+.combatlog .hits .crit{color:#b8863b} .combatlog .hits .blk{color:var(--faint);font-style:normal}
+.combatlog .hits .miss{color:var(--faint)}
+.combatlog .sum{margin-top:3px;color:var(--muted)}
+.combatlog .sum b{color:var(--ink)}
+.combatlog .evline{margin-top:3px;font-size:12.5px}
+.combatlog .ev{color:var(--muted)} .combatlog .ev.heal{color:#3f6f4b} .combatlog .ev.st{color:#8a5a86}
+@media (prefers-reduced-motion:reduce){
+  .medallion,.ribbon,.arena{animation:none!important}
+}

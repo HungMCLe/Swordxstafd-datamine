@@ -11,8 +11,9 @@
   var DATA = null, CURVES = null, LOAD = { a: [null, null, null, null, null, null, null, null],
                                            b: [null, null, null, null, null, null, null, null] };
   var FIELDS = ["hp", "atk", "def", "spd", "mast", "kfm", "aff", "eres", "aegis",
-                "cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "acc", "erate", "edodge"];
-  var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff"];
+                "cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "acc", "erate", "edodge",
+                "pvpadd", "pvpres"];
+  var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "pvpadd", "pvpres"];
   var A_COL = "#b8863b", B_COL = "#3d6ea8";
   var SIDE = ["a", "b"], WHO = ["You", "Opponent"];
 
@@ -155,27 +156,33 @@
     var myMasterBase = elemental ? att.rank.BaseElementMaster : att.rank.BaseKongFuMaster;
     var eNum = 1 + aff / def.rank.BaseElementReduce + mast / foeMasterBase;
     var eDen = 1 + (elemental ? def.aegis / att.rank.BaseElementAdd : 0) + def.eres / myMasterBase;
-    var pct = (1 + att.boost + def.vuln) / Math.max(0.1, 1 + def.dmgres);
+    var pct = (1 + att.boost + (att.pvpadd || 0) + def.vuln) / Math.max(0.1, 1 + def.dmgres + (def.pvpres || 0));
     var defTerm = att.atk / (att.atk + def.def);
+    /* this is a player hitting a player: Damage() divides by the target's two
+       per-rank PvP scalers, and the few skills with a PvpPropScale shrink too */
+    var psdr = 1 + (def.rank.PlayerSkillDmgReduceScale || 0) / 10000;
+    var prosdr = 1 + (def.rank.ProSkillDmgReduceScale || 0) / 10000;
+    var pvp = (sk.pvp || 10000) / 10000;
     var flat = flatOf(row, "fx", "fg", "SkillFixedAttack1", att.slevel, att.rank.name);
     var out = { hits: [], heal: 0 };
     if (ec && ec.skillType === "Cure" || (row.SkillCureByHp && !row.SkillAttack1)) {
-      out.heal = (row.SkillCureByHp || 0) / 100 * att.hpMax +
-                 flatOf(row, "SkillFixedCure", "SkillFixedCure_g", "SkillFixedCure", att.slevel, att.rank.name);
+      out.heal = ((row.SkillCureByHp || 0) / 100 * att.hpMax +
+                  flatOf(row, "SkillFixedCure", "SkillFixedCure_g", "SkillFixedCure", att.slevel, att.rank.name)) * pvp;
       return out;
     }
-    function one(coef, withFlat, on, ignoreShield) {
-      var base = (att.atk * coef + (withFlat ? flat : 0)) * defTerm;
-      var add = ((att.fadd || 0) + (def.fvuln || 0) - (def.fred || 0)) * coef;
+    function one(coef, withFlat, on, ignoreShield, at) {
+      var base = (att.atk * coef / psdr + (withFlat ? flat : 0)) * defTerm;
+      var add = ((att.fadd || 0) + (def.fvuln || 0) - (def.fred || 0)) * coef / psdr;
       add = Math.max(-0.9 * base, add);              /* FixedDmgLimitPercent */
-      out.hits.push({ d: (base + add) * (eNum / eDen) * pct, on: on || [], ignoreShield: !!ignoreShield });
+      out.hits.push({ d: (base + add) / prosdr * (eNum / eDen) * pct * pvp, on: on || [],
+                      ignoreShield: !!ignoreShield, at: at || 0 });
     }
     if (ec && ec.hits && ec.hits.length) {
-      ec.hits.forEach(function (h, i) { one((row[h.prop] || 0) / 100, i === 0, h.on, h.ignoreShield); });
+      ec.hits.forEach(function (h, i) { one((row[h.prop] || 0) / 100, i === 0, h.on, h.ignoreShield, h.at); });
     } else {
       var coef = ((row.SkillAttack1 || 0) + (row.SkillAttack2 || 0) + (row.SkillAttack3 || 0) + (row.SkillAttack4 || 0)) / 100;
       var cnt = sk.hits || 1;
-      for (var k = 0; k < cnt; k++) one(coef / cnt, k === 0, [], false);
+      for (var k = 0; k < cnt; k++) one(coef / cnt, k === 0, [], false, 0.3 + k * 0.15);
     }
     return out;
   }
@@ -329,7 +336,7 @@
       var rows = (entry.r || {})[String(src.s.srank)] || {};
       var srcE = eff(src, sides), tgtE = eff(tgt, sides);
       srcE.hpMax = src.s.hp; tgtE.hpMax = tgt.s.hp;
-      var fake = { id: skillId, name: entry.name, ele: (entry.ec && entry.ec.ele) || "None", ec: entry.ec, hits: 1, r: entry.r || {} };
+      var fake = { id: skillId, name: entry.name, ele: (entry.ec && entry.ec.ele) || "None", ec: entry.ec, hits: 1, r: entry.r || {}, pvp: entry.pvp || 10000 };
       var parts = hitParts(srcE, tgtE, fake, rows);
       if (parts.heal) {
         /* a heal from a trigger targets whoever the cfg says; fireSkill is called with that as tgt */
@@ -378,7 +385,7 @@
           if (foe.shield <= 0) foe.st.filter(function (x) { return x.meta.shield; }).forEach(function (x) { removeStatus(foe, x); });
         }
         foe.hp -= d; total += d;
-        if (rolled) rolled.push({ d: d, crit: crit, block: block, absorbed: absorbed, blinded: blinded });
+        if (rolled) rolled.push({ d: d, crit: crit, block: block, absorbed: absorbed, blinded: blinded, at: h.at || 0 });
       });
       return total;
     }
@@ -523,6 +530,7 @@
       return { t: Math.round(me.t), side: me.idx, who: WHO[me.idx], slot: slot,
                skill: pick ? pick.name : (note === "start" ? "—" : note + " — no action"),
                skillId: pick ? pick.id : 0, ele: pick ? pick.ele : "None", hits: rolled, dmg: total,
+               dur: pick && pick.ec && pick.ec.dur ? pick.ec.dur : 0.8,
                events: ev || [], turn: me.turns, cd: me.cd.slice(), note: note,
                hpA: Math.max(0, sides[0].hp), hpB: Math.max(0, sides[1].hp),
                shA: Math.round(sides[0].shield), shB: Math.round(sides[1].shield),
@@ -809,6 +817,8 @@
 
   function sceneReset() {
     if (!PLAY) return;
+    clearTimers();
+    PLAY.playing = false; PLAY.busy = false;
     hpSet("a", PLAY.A.hp, PLAY.A.hp, 0, false);
     hpSet("b", PLAY.B.hp, PLAY.B.hp, 0, false);
     SIDE.forEach(function (s, idx) {
@@ -821,42 +831,147 @@
     });
     document.querySelectorAll(".slot.acting").forEach(function (e) { e.classList.remove("acting"); });
     $("banner").hidden = true;
+    $("ribbon").hidden = true;
+    $("combatlog").innerHTML = "";
     PLAY.i = 0;
     orderStrip(0);
   }
 
-  function stepOnce() {
-    if (!PLAY) return false;
-    var log = PLAY.sample.log;
-    if (PLAY.i >= log.length) { finish(); return false; }
-    var l = log[PLAY.i], me = SIDE[l.side], foe = SIDE[1 - l.side];
+  /* ---------- playback: one action at a time, hits on the prefab's clock ---------- */
+  var TIMERS = [];
+  function later(fn, ms) { var t = setTimeout(fn, Math.max(0, ms)); TIMERS.push(t); return t; }
+  function clearTimers() { TIMERS.forEach(clearTimeout); TIMERS = []; }
+  function speedMs() { var v = parseInt($("speed").value, 10); return v; }   /* ms per game-second; 0 = instant */
+
+  function ribbon(text, side) {
+    var r = $("ribbon"); r.hidden = false; r.className = "ribbon " + side; r.textContent = text;
+    r.classList.remove("in"); void r.offsetWidth; r.classList.add("in");
+  }
+  function pulse(el, cls, ms) {
+    if (!el) return;
+    cls.split(" ").forEach(function (c) { el.classList.remove(c); });
+    void el.offsetWidth;
+    cls.split(" ").forEach(function (c) { el.classList.add(c); });
+    later(function () { cls.split(" ").forEach(function (c) { el.classList.remove(c); }); }, ms || 380);
+  }
+  function logLine(html, cls) {
+    var ol = $("combatlog"), li = document.createElement("li");
+    li.className = cls || ""; li.innerHTML = html; ol.appendChild(li);
+    ol.scrollTop = ol.scrollHeight;
+    return li;
+  }
+  function hitText(h) {
+    if (h.blinded) return '<em class="miss">miss</em>';
+    return fmt(h.d) + (h.crit ? ' <b class="crit">crit</b>' : h.block ? ' <i class="blk">block</i>' : '') +
+      (h.absorbed ? ' <i class="blk">(' + fmt(h.absorbed) + ' to shield)</i>' : '');
+  }
+  function eventText(e) {
+    if (e.kind === "heal") return '<span class="ev heal">' + WHO[e.who] + ' heals ' + fmt(e.amount) + ' <i>(' + e.tag + ')</i></span>';
+    if (e.kind === "dmg") return '<span class="ev">' + e.tag + ' hits ' + WHO[e.who] + ' for ' + fmt(e.amount) + '</span>';
+    return '<span class="ev st">\u2726 ' + e.name + ' on ' + WHO[e.who] + '</span>';
+  }
+  function headText(l) {
+    return '<span class="who ' + SIDE[l.side] + '">' + l.who + '</span> <span class="tn">turn ' + l.turn + '</span> \u2014 <b>' +
+      (l.note && l.note !== "start" ? l.note + ', no action' : l.skill) + '</b>';
+  }
+  function sumText(l) {
+    if (!l.hits.length) return "";
+    return '<div class="sum">' + l.hits.length + (l.hits.length === 1 ? ' hit, ' : ' hits, ') + '<b>' + fmt(l.dmg) +
+      '</b> \u2192 ' + WHO[1 - l.side] + ' at ' + fmt(l.left) + '</div>';
+  }
+
+  function playAction(l, k, done) {
+    var me = SIDE[l.side], foe = SIDE[1 - l.side], f = speedMs() / 1000;
+    var prev = k > 0 ? PLAY.sample.log[k - 1] : null;
+    var hp = { a: prev ? prev.hpA : PLAY.A.hp, b: prev ? prev.hpB : PLAY.B.hp };
+    var sh = { a: prev ? prev.shA : 0, b: prev ? prev.shB : 0 };
+    var max = { a: PLAY.A.hp, b: PLAY.B.hp };
     document.querySelectorAll(".slot.acting").forEach(function (e) { e.classList.remove("acting"); });
+    ribbon("Turn " + l.turn + " \u00b7 " + l.who, me);
+    var li = logLine(headText(l), "turn " + me);
+    if (l.note && l.note !== "start") {
+      $(me + "_callout").innerHTML = '<span class="ctl">' + l.note + '</span><small>turn ' + l.turn + '</small>';
+      pulse($(me + "_portrait"), "stunned", 600 * f + 200);
+      applyEvents(l, li, f, function () { finishAction(l, me, done, f); });
+      return;
+    }
     if (l.slot >= 0) $(me + "_slot" + l.slot).classList.add("acting");
-    $(me + "_callout").innerHTML = (l.note && l.note !== "start"
-      ? '<span class="ctl">' + l.note + '</span>'
-      : '<span class="ele-' + (l.ele || "none").toLowerCase() + '">' + l.skill + '</span>') +
-      '<small>turn ' + l.turn + '</small>';
-    l.hits.forEach(function (h, k) {
-      setTimeout(function () {
-        var txt = h.blinded ? "MISS (blind)" : "−" + fmt(h.d) + (h.crit ? " CRIT" : h.block ? " BLOCK" : "") + (h.absorbed ? " (" + fmt(h.absorbed) + " to shield)" : "");
+    $(me + "_callout").innerHTML = '<span class="ele-' + (l.ele || "none").toLowerCase() + '">' + l.skill + '</span><small>turn ' + l.turn + '</small>';
+    pulse($(me + "_portrait"), "lunge-" + me, 520 * f + 200);
+    var hits = [], last = 0;
+    var box = document.createElement("div"); box.className = "hits"; li.appendChild(box);
+    l.hits.forEach(function (h) {
+      var at = (0.15 + (h.at || 0)) * 1000 * f;
+      last = Math.max(last, at);
+      later(function () {
+        var txt = h.blinded ? "MISS" : "\u2212" + fmt(h.d) + (h.crit ? " CRIT" : h.block ? " BLOCK" : "");
         float(foe, txt, h.blinded ? "block" : h.crit ? "crit" : h.block ? "block" : "");
-      }, Math.min(k * 45, 500));
+        pulse($(foe + "_portrait"), h.crit ? "shake hard" : "shake", 320);
+        if (h.crit) pulse($("arena"), "flash", 220);
+        if (h.absorbed) sh[foe] = Math.max(0, sh[foe] - h.absorbed);
+        hp[foe] = Math.max(0, hp[foe] - h.d);
+        hpSet(foe, hp[foe], max[foe], sh[foe], true);
+        hits.push(hitText(h));
+        box.innerHTML = hits.join(" \u00b7 ");
+        $("combatlog").scrollTop = $("combatlog").scrollHeight;
+      }, at);
     });
+    later(function () {
+      li.innerHTML += sumText(l);
+      applyEvents(l, li, f, function () { finishAction(l, me, done, f); });
+    }, last + 240 * f);
+  }
+
+  function applyEvents(l, li, f, done) {
     l.events.forEach(function (e, k) {
-      setTimeout(function () {
-        if (e.kind === "heal") float(SIDE[e.who], "+" + fmt(e.amount) + " " + e.tag, "heal");
-        else if (e.kind === "dmg") float(SIDE[e.who], "−" + fmt(e.amount) + " " + e.tag, "");
-        else float(SIDE[e.who], e.name, "status");
-      }, 300 + k * 120);
+      later(function () {
+        var s = SIDE[e.who];
+        if (e.kind === "heal") float(s, "+" + fmt(e.amount) + " " + e.tag, "heal");
+        else if (e.kind === "dmg") { float(s, "\u2212" + fmt(e.amount) + " " + e.tag, ""); pulse($(s + "_portrait"), "shake", 300); }
+        else float(s, e.name, "status");
+        li.innerHTML += '<div class="evline">' + eventText(e) + '</div>';
+        $("combatlog").scrollTop = $("combatlog").scrollHeight;
+      }, k * 180 * f);
     });
+    later(done, (l.events.length ? l.events.length * 180 + 120 : 0) * f);
+  }
+
+  function finishAction(l, me, done, f) {
     hpSet("a", l.hpA, PLAY.A.hp, l.shA, true);
     hpSet("b", l.hpB, PLAY.B.hp, l.shB, true);
     chips("a", l.stA); chips("b", l.stB);
     cdPaint(me, l.cd);
     PLAY.i++;
     orderStrip(PLAY.i);
-    if (PLAY.i >= log.length) { setTimeout(finish, 500); return false; }
+    later(done, 300 * f);
+  }
+
+  function stepOnce() {
+    if (!PLAY || PLAY.busy) return false;
+    var log = PLAY.sample.log;
+    if (PLAY.i >= log.length) { finish(); return false; }
+    if (speedMs() === 0) { instant(); return false; }
+    PLAY.busy = true;
+    playAction(log[PLAY.i], PLAY.i, function () {
+      PLAY.busy = false;
+      if (PLAY.i >= PLAY.sample.log.length) finish();
+      else if (PLAY.playing) stepOnce();
+    });
     return true;
+  }
+
+  function instant() {
+    var log = PLAY.sample.log;
+    while (PLAY.i < log.length) {
+      var l = log[PLAY.i]; PLAY.i++;
+      var li = logLine(headText(l), "turn " + SIDE[l.side]);
+      if (l.hits.length) li.innerHTML += '<div class="hits">' + l.hits.map(hitText).join(" \u00b7 ") + '</div>' + sumText(l);
+      l.events.forEach(function (e) { li.innerHTML += '<div class="evline">' + eventText(e) + '</div>'; });
+      hpSet("a", l.hpA, PLAY.A.hp, l.shA, false); hpSet("b", l.hpB, PLAY.B.hp, l.shB, false);
+      chips("a", l.stA); chips("b", l.stB);
+      cdPaint(SIDE[l.side], l.cd);
+    }
+    orderStrip(PLAY.i); finish();
   }
 
   function finish() {
@@ -864,39 +979,28 @@
     var s = PLAY.sample, b = $("banner");
     b.hidden = false;
     b.className = "banner " + (s.winner === 0 ? "wina" : s.winner === 1 ? "winb" : "draw");
-    b.innerHTML = s.winner === 0 ? "You win" : s.winner === 1 ? "Opponent wins"
-      : (s.capped ? "Round cap reached &mdash; both standing" : "No result");
+    var text = s.winner === 0 ? "You win" : s.winner === 1 ? "Opponent wins"
+      : (s.capped ? "Round cap reached \u2014 both standing" : "No result");
+    b.innerHTML = text;
+    logLine('<b>' + text + '</b> after ' + s.turns + ' actions', "end");
+    $("ribbon").hidden = true;
     stopPlayback(true);
   }
 
   function stopPlayback(keepButtons) {
-    if (PLAY && PLAY.timer) { clearTimeout(PLAY.timer); PLAY.timer = null; }
+    if (PLAY) { PLAY.playing = false; PLAY.busy = false; }
+    clearTimers();
     $("play").innerHTML = "&#9654; Watch one fight";
     if (!keepButtons) { $("play").disabled = !PLAY; $("step").disabled = !PLAY; }
   }
 
-  function playLoop() {
-    if (!PLAY) return;
-    var ms = parseInt($("speed").value, 10);
-    if (ms === 0) {
-      while (PLAY.i < PLAY.sample.log.length) {
-        var l = PLAY.sample.log[PLAY.i]; PLAY.i++;
-        hpSet("a", l.hpA, PLAY.A.hp, l.shA, false); hpSet("b", l.hpB, PLAY.B.hp, l.shB, false);
-        chips("a", l.stA); chips("b", l.stB);
-        cdPaint(SIDE[l.side], l.cd);
-      }
-      orderStrip(PLAY.i); finish(); return;
-    }
-    if (!stepOnce()) return;
-    PLAY.timer = setTimeout(playLoop, ms);
-  }
-
   function togglePlay() {
     if (!PLAY) return;
-    if (PLAY.timer) { stopPlayback(); return; }
+    if (PLAY.playing) { stopPlayback(); return; }
     if (PLAY.i >= PLAY.sample.log.length) sceneReset();
+    PLAY.playing = true;
     $("play").innerHTML = "&#10074;&#10074; Pause";
-    playLoop();
+    stepOnce();
   }
 
   /* ---------- slot picker ---------- */
@@ -1029,7 +1133,13 @@
     });
     $("run").addEventListener("click", run);
     $("play").addEventListener("click", togglePlay);
-    $("step").addEventListener("click", function () { stopPlayback(); if (PLAY && PLAY.i >= PLAY.sample.log.length) sceneReset(); stepOnce(); });
+    $("step").addEventListener("click", function () {
+      if (!PLAY) return;
+      if (PLAY.busy) return;
+      PLAY.playing = false; $("play").innerHTML = "&#9654; Watch one fight";
+      if (PLAY.i >= PLAY.sample.log.length) sceneReset();
+      stepOnce();
+    });
     $("reset").addEventListener("click", function () {
       try { localStorage.removeItem("pw_duel"); } catch (e) {}
       location.reload();
@@ -1057,7 +1167,10 @@
     DATA = v[0]; CURVES = v[1];
     DATA.statuses = DATA.statuses || {}; DATA.trig = DATA.trig || {};
     boot();
-    var names = ["Divine Wrath", "Aqua Vortex", "Howling Hurricane", "Fire Blast",
+    /* an Archmage-line kit that trades blows for a while: Divine Wrath at this
+       rank is a near one-shot even after the PvP halving, so it is left for the
+       picker rather than the opening demo */
+    var names = ["Aqua Vortex", "Howling Hurricane", "Fire Blast", "Meteoric Flames",
                  "Rapid Cast", "Frost Guard", "Incarnation of Light", "Radiant Sear"];
     names.forEach(function (nm, i) {
       var s = DATA.skills.filter(function (x) { return x.name === nm; })[0];
