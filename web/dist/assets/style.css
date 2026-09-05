@@ -575,3 +575,6 @@ table.log td.mono{font:500 12px var(--mono);letter-spacing:.08em;color:var(--mut
 .chip.debuff{color:#7a4a3a;border-color:#c9a08f;background:rgba(163,96,63,.12)}
 .float.status{color:#8a5a86;font-size:13px;font-weight:700}
 .callout .ctl{color:#8a5a86}
+
+select.fclass{font:600 13px var(--body);padding:4px 8px;border-radius:7px;background:var(--raised);color:var(--ink);border:1px solid var(--line);cursor:pointer;max-width:12em}
+select.fclass:disabled{opacity:.7;cursor:default}

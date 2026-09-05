@@ -696,25 +696,63 @@
     portraits();
   }
 
+  /* the class each side plays, and its promotion line: the class itself and
+     every class it promoted from — the tiers it can still draw skills from */
+  var TREE = {};
+  (C.classTree || []).forEach(function (c) { TREE[c.name] = c; });
   function classOf(side) {
-    var tally = {};
-    LOAD[side].forEach(function (sk) { if (sk) tally[sk.cls] = (tally[sk.cls] || 0) + 1; });
-    var best = null;
-    Object.keys(tally).forEach(function (c) { if (!best || tally[c] > tally[best]) best = c; });
-    return best;
+    var el = $(side + "_cls");
+    if ($("mirror").checked && side === "b") el = $("a_cls");
+    return el ? el.value : null;
   }
+  function lineOf(cls) {
+    var out = {}, cur = cls, guard = 0;
+    while (cur && TREE[cur] && guard++ < 10) { out[cur] = true; cur = TREE[cur].pre; }
+    return out;
+  }
+  function inLine(side, sk) { return !!lineOf(classOf(side))[sk.cls]; }
 
   function portraits() {
     SIDE.forEach(function (side) {
       var cls = classOf(side), el = $(side + "_portrait"), icon = cls ? C.classIcon[cls] : null;
-      var first = LOAD[side].filter(function (x) { return x && x.kind === "Technique"; })[0];
       if (icon) el.innerHTML = '<img src="../assets/skills/class_' + icon + '.png" alt="' + cls + '">';
-      else if (first) el.innerHTML = '<img src="../assets/skills/skill_' + first.id + '.png" alt="">';
-      else el.innerHTML = '<span class="medallion-empty">?</span>';
-      $(side + "_class").textContent = cls || "";
+      else el.innerHTML = '<span class="medallion-empty">' + (cls ? cls[0] : "?") + '</span>';
+      if (side === "b") { $("b_cls").value = cls; $("b_cls").disabled = $("mirror").checked; }
       var r = C.ranks[parseInt($(side + "_rank").value, 10)];
       $(side + "_rankname").textContent = r ? r.name : "";
     });
+  }
+
+  function mirrorLoadout() {
+    LOAD.b = LOAD.a.slice();
+    for (var i = 0; i < TECH + CHARM; i++) paint("b", i);
+  }
+
+  /* fill any empty slot from the line, the class's own tier first — nobody
+     walks into a fight with an empty bar */
+  function seedLoadout(side) {
+    var line = lineOf(classOf(side));
+    var pool = DATA.skills.filter(function (s) { return line[s.cls]; })
+      .sort(function (a, b) { return TREE[b.cls].tier - TREE[a.cls].tier || a.id - b.id; });
+    var used = {};
+    LOAD[side].forEach(function (sk) { if (sk) used[sk.id] = true; });
+    for (var k = 0; k < TECH + CHARM; k++) {
+      if (LOAD[side][k]) continue;
+      var want = k < TECH ? "Technique" : "Charm";
+      var next = pool.filter(function (s) { return s.kind === want && !used[s.id] && (want === "Technique" || (s.props && Object.keys(s.props).length) || s.passive); })[0];
+      if (next) { LOAD[side][k] = next; used[next.id] = true; paint(side, k); }
+    }
+  }
+
+  /* a class change drops anything the new line cannot equip, then refills */
+  function reclass(side) {
+    LOAD[side].forEach(function (sk, k) {
+      if (sk && !inLine(side, sk)) { LOAD[side][k] = null; paint(side, k); }
+    });
+    seedLoadout(side);
+    if ($("mirror").checked && side === "a") mirrorLoadout();
+    portraits();
+    invalidate();
   }
 
   function hpSet(side, cur, max, shield, animate) {
@@ -866,6 +904,10 @@
   function openPicker(side, slot) {
     current = { side: side, slot: slot };
     $("pickfind").value = "";
+    /* the class filter offers the line, highest tier first */
+    var line = Object.keys(lineOf(classOf(side))).sort(function (a, b) { return TREE[b].tier - TREE[a].tier; });
+    $("pickclass").innerHTML = '<option value="">Whole line</option>' +
+      line.map(function (c) { return '<option value="' + c + '">' + c + ' (T' + TREE[c].tier + ')</option>'; }).join("");
     fillList("");
     $("pickfind").placeholder = "Search " + (slot >= TECH ? "Charms" : "Techniques") + "…";
     $("pickele").hidden = slot >= TECH;
@@ -892,15 +934,18 @@
   function fillList(q) {
     q = q.toLowerCase();
     var want = current && current.slot >= TECH ? "Charm" : "Technique";
+    var line = lineOf(classOf(current.side));
     var wantCls = $("pickclass").value, wantEle = $("pickele").value;
     var matches = DATA.skills.filter(function (s) {
       if (s.kind !== want) return false;
+      if (!line[s.cls]) return false;
       if (wantCls && s.cls !== wantCls) return false;
       if (wantEle && want === "Technique" && s.ele !== wantEle) return false;
       return !q || s.name.toLowerCase().indexOf(q) >= 0 || s.cls.toLowerCase().indexOf(q) >= 0;
     });
     $("pickcount").textContent = matches.length + " of " +
-      DATA.skills.filter(function (s) { return s.kind === want; }).length;
+      DATA.skills.filter(function (s) { return s.kind === want && line[s.cls]; }).length +
+      " in the " + classOf(current.side) + " line";
     var out = matches.slice(0, 200).map(function (s) {
       var on = LOAD[current.side].some(function (x, k) { return x && x.id === s.id && k !== current.slot; });
       var cdrow = s.r && s.r["22"] ? s.r["22"].CD : 0;
@@ -931,7 +976,6 @@
       Object.keys(byTier[t]).sort().forEach(function (c) { html += '<option value="' + c + '">' + c + '</option>'; });
       html += '</optgroup>';
     });
-    $("pickclass").innerHTML = html;
     var eh = '<option value="">Any element</option>';
     ["Physical", "Wind", "Water", "Fire", "Light", "Dark"].forEach(function (e) {
       if (eles[e]) eh += '<option value="' + e + '">' + e + '</option>';
@@ -979,6 +1023,7 @@
       }
       LOAD[current.side][current.slot] = picked;
       paint(current.side, current.slot);
+      if ($("mirror").checked && current.side === "a") mirrorLoadout();
       invalidate();
       $("picker").close();
     });
@@ -992,8 +1037,12 @@
     $("mirror").addEventListener("change", function () {
       document.querySelector('.fighter[data-side="b"]').classList.toggle("dimmed", this.checked);
       document.querySelector('.duelstats details:nth-of-type(2)').classList.toggle("dimmed", this.checked);
+      if (this.checked) mirrorLoadout();
+      portraits();
       invalidate();
     });
+    $("a_cls").addEventListener("change", function () { reclass("a"); });
+    $("b_cls").addEventListener("change", function () { reclass("b"); });
     document.querySelector('.fighter[data-side="b"]').classList.add("dimmed");
     document.querySelector('.duelstats details:nth-of-type(2)').classList.add("dimmed");
     document.querySelectorAll(".duelstats input, .duelstats select").forEach(function (el) {

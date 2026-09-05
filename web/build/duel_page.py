@@ -73,16 +73,27 @@ def render(layout, base_tables, dist: Path, out: Path):
     # rank labels ("Divine +6") and class portraits, for the scene
     sk = json.loads((out / "_skills.json").read_text(encoding="utf-8"))
     avail = {p.stem for p in (dist / "assets" / "skills").glob("class_*.png")}
-    class_icon = {}
+    class_icon, class_tree = {}, []
     for t in sk["tiers"]:
         for c in t["classes"]:
             base = Path((c.get("icon") or "").strip()).name
             class_icon[c["name"]] = base if base and f"class_{base}" in avail else None
+            pre = (c.get("prePro") or "").strip()
+            class_tree.append({"name": c["name"], "tier": t["tier"],
+                               "pre": pre if pre and pre != "None" else None,
+                               "icon": class_icon[c["name"]]})
+    # prePro holds the internal id; map it to the display name the tree uses
+    id2name = {}
+    for t in sk["tiers"]:
+        for c in t["classes"]:
+            id2name[c["id"]] = c["name"]
+    for c in class_tree:
+        c["pre"] = id2name.get(c["pre"], c["pre"]) if c["pre"] else None
 
     cfg = json.dumps({"ranks": ranks, "minCrit": 1.3, "minBlock": 1.5,
                       "speedScale": spd_scale, "v": _b.asset_v(),
                       "rankLabels": sk["rankLabels"], "rankQuality": sk["rankQuality"],
-                      "classIcon": class_icon},
+                      "classIcon": class_icon, "classTree": class_tree},
                      ensure_ascii=False).replace("</", "<\\/")
     dflt = next((i for i, r in enumerate(ranks) if r["name"] == "Champion III"), len(ranks) // 2)
     ropts = "".join(f'<option value="{i}"{" selected" if i == dflt else ""}>'
@@ -101,12 +112,21 @@ def render(layout, base_tables, dist: Path, out: Path):
             f'<span class="slotnum">{n - n0 + 1}</span></button>'
             for n in range(n0, n0 + count))
 
+    tiers = {}
+    for c in class_tree:
+        tiers.setdefault(c["tier"], []).append(c["name"])
+    clsopts = "".join(
+        f'<optgroup label="Tier {t}">' +
+        "".join(f'<option value="{html.escape(nm)}"{" selected" if nm == "Archmage" else ""}>{html.escape(nm)}</option>'
+                for nm in names) + "</optgroup>"
+        for t, names in sorted(tiers.items()))
+
     def fighter(side, label):
         return f"""
       <section class="fighter" data-side="{side}">
         <div class="nameplate">
           <span class="fname">{label}</span>
-          <span class="fclass" id="{side}_class"></span>
+          <select class="fclass" id="{side}_cls" aria-label="{label}: class">{clsopts}</select>
           <span class="frank" id="{side}_rankname"></span>
         </div>
         <div class="hpbar"><div class="hpfill" id="{side}_hpfill"></div>
@@ -136,7 +156,8 @@ def render(layout, base_tables, dist: Path, out: Path):
 <div class="wrap wide">
 <p class="eyebrow">Combat mechanics</p>
 <h1>Duel simulator</h1>
-<p class="lede">Load four Techniques and four Charms a side, tap a slot to change it, then run a thousand
+<p class="lede">Pick a class a side, load four Techniques and four Charms from its line &mdash; its own tier and every
+tier below it &mdash; tap a slot to change one, then run a thousand
 duels &mdash; or watch one play out action by action on the game's own turn clock, with every hit through
 <code>Damage()</code> and every crit and block rolled.</p>
 
