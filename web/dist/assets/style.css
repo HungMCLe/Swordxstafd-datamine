@@ -493,17 +493,6 @@ table.log{font-size:13px} table.log td{padding:6px 12px}
   border:3px solid var(--line);box-shadow:inset 0 0 0 4px var(--surface),0 6px 18px rgba(0,0,0,.14)}
 .medallion img{width:84%;height:84%;object-fit:contain}
 .medallion-empty{font:700 34px var(--body);color:var(--faint)}
-/* phones: the whole slots-medallion-slots row has to fit in ~260px */
-@media (max-width:480px){
-  .medallion{width:84px;height:84px;border-width:2px}
-  .fighter-row{gap:6px}
-  .fighter{padding:10px 6px 8px}
-  .fighter .slot{width:52px;height:52px;margin-bottom:24px}
-  .fighter .slot .slotcap{width:74px;font-size:9px}
-  .fighter .slot .starbadge{min-width:20px;height:16px;font-size:9px;line-height:16px;top:-5px;left:-5px}
-.fighter .slot .cdov{font-size:17px}
-  .fname{font-size:14px}
-}
 .fighter .slot .slotlv{white-space:nowrap}
 
 /* game-style circular slots: icon, star badge, cooldown veil, name + level under */
@@ -658,3 +647,42 @@ select.fclass:disabled{opacity:.7;cursor:default}
 .skilltip .tt-desc .kw{color:var(--gold);border-bottom:1px dotted currentColor}
 .skilltip .tt-desc .dnum{font-family:var(--mono);font-weight:600;color:var(--ink)}
 .skilltip .tt-st{margin-top:6px;font-size:12px;color:#8a5a86}
+
+/* ---------- phones ---------- */
+@media (max-width:760px){
+  /* masthead: brand on one line, the nav as a single scrolling row */
+  .masthead-in{padding:8px 14px 0;gap:4px 14px}
+  .brand{font-size:1.02rem} .brand small{display:none}
+  nav.top{width:100%;flex-wrap:nowrap;gap:16px;overflow-x:auto;scrollbar-width:none;padding-bottom:0}
+  nav.top::-webkit-scrollbar{display:none}
+  nav.top a{white-space:nowrap;font-size:13.5px;padding:6px 0 8px}
+  /* the arena stacks: fighters, then the play controls, then the log */
+  .arena{display:flex;flex-direction:column;padding:10px 8px 8px;margin:16px -6px 14px}
+  .arena-grid{display:contents}
+  .orderstrip{order:0;min-height:38px;padding:2px 2px 8px}
+  .arena-body{order:1;grid-template-columns:1fr;gap:8px}
+  .playbar{order:2;margin:8px 0 2px;padding-top:10px;gap:8px 10px}
+  .sidelog{order:3;margin-top:8px}
+  .sidelog .combatlog{max-height:300px;min-height:110px}
+  .vs{display:none}
+  .fighter{padding:9px 8px 6px}
+  .nameplate{margin-bottom:6px;gap:6px} .fname{font-size:14px} .fclass{font-size:12px}
+  .hpbar{height:16px;margin-bottom:8px}
+  /* the portrait on the left, Techniques in a row beside it, Charms in a row under them */
+  .fighter-row{grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto auto;gap:4px 8px;align-items:start}
+  .fighter-row .medallion{grid-column:1;grid-row:1/3;align-self:center;width:66px;height:66px;border-width:2px;
+    box-shadow:inset 0 0 0 3px var(--surface),0 4px 12px rgba(0,0,0,.14)}
+  .fighter-row .slotcol{grid-column:2;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;justify-items:center}
+  .fighter-row .slotcol:first-child{grid-row:1}
+  .fighter-row .slotcol:last-child{grid-row:2}
+  .fighter .slot{width:46px;height:46px;margin-bottom:20px}
+  .fighter .slot .slotcap{width:60px;font-size:8px;margin-top:1px}
+  .fighter .slot .slotlv{display:none}
+  .fighter .slot .slotnum{font-size:12px}
+  .fighter .slot .starbadge{min-width:18px;height:15px;padding:0 4px;font-size:8.5px;line-height:15px;top:-5px;left:-5px}
+  .fighter .slot .cdov{font-size:15px}
+  .runbtn{padding:11px 18px;font-size:14px}
+  .playbar .hint{display:none}
+  .playbar .mirror{font-size:12.5px}
+  .duelstats{grid-template-columns:1fr}
+}
