@@ -765,6 +765,24 @@
     portraits();
   }
 
+  /* a realistic Champion-tier sheet for each line: the Mage one is a real
+     Archmage's character screen; the Warrior one is invented to sit in the
+     same range with the emphasis a plate-wearer has (DEF, HP, block, Physical Mastery) */
+  var DEFAULTS = {
+    Mage:    { hp: 2640000, atk: 494000, def: 392000, spd: 426000, mast: 86600, kfm: 15600, aff: 8040,
+               eres: 9380, aegis: 7080, cr: 45, cd: 94.3, critres: 29.1, boost: 30.8, dmgres: 24,
+               blockrate: 11.4, blockeff: 100, acc: 37700, erate: 13100, edodge: 63600, pvpadd: 9.6, pvpres: 9.6 },
+    Warrior: { hp: 3420000, atk: 452000, def: 531000, spd: 381000, mast: 14200, kfm: 81500, aff: 6300,
+               eres: 9100, aegis: 7400, cr: 39, cd: 86.5, critres: 31.5, boost: 26.4, dmgres: 29.5,
+               blockrate: 27.8, blockeff: 118, acc: 33900, erate: 11800, edodge: 58900, pvpadd: 9.6, pvpres: 9.6 }
+  };
+  function rootOf(cls) { var cur = cls, g = 0; while (TREE[cur] && TREE[cur].pre && g++ < 10) cur = TREE[cur].pre; return cur; }
+  function applyDefaults(side) {
+    var d = DEFAULTS[rootOf(classOf(side))];
+    if (!d) return;
+    FIELDS.forEach(function (f) { var el = $(side + "_" + f); if (el && d[f] !== undefined) el.value = d[f]; });
+  }
+
   /* the class each side plays, and its promotion line: the class itself and
      every class it promoted from — the tiers it can still draw skills from */
   var TREE = {};
@@ -813,12 +831,15 @@
     }
   }
 
-  /* a class change drops anything the new line cannot equip, then refills */
+  /* a class change drops anything the new line cannot equip, refills, and
+     loads that line's sheet */
   function reclass(side) {
     LOAD[side].forEach(function (sk, k) {
       if (sk && !inLine(side, sk)) { LOAD[side][k] = null; paint(side, k); }
     });
     seedLoadout(side);
+    applyDefaults(side);
+    paintAll();
     if ($("mirror").checked && side === "a") mirrorLoadout();
     portraits();
     invalidate();
@@ -1149,6 +1170,59 @@
     $("pickele").innerHTML = eh;
   }
 
+  /* ---------- hover cards ---------- */
+  function tipHtml(side, sk) {
+    var S = sheet(side), rows = sk.r[String(S.srank)] || {};
+    var head = '<div class="tt-head"><img src="../assets/skills/skill_' + sk.id + '.png" alt=""><div><b>' + sk.name + '</b>' +
+      '<span class="tt-meta">' + sk.kind + ' \u00b7 ' + sk.cls + ' T' + sk.tier +
+      (sk.kind === "Technique" ? ' \u00b7 ' + sk.ele : '') + ' \u00b7 ' + (C.rankLabels[String(S.srank)] || "") + ' \u00b7 Lv ' + S.slevel + '</span></div></div>';
+    var rowsHtml = "";
+    if (sk.kind === "Technique") {
+      var hits = sk.ec && sk.ec.hits.length ? sk.ec.hits.length : (sk.hits || 1);
+      var cd = rows.CD || 0;
+      rowsHtml += '<dt>Cooldown</dt><dd>' + (cd ? cd + ' turn' + (cd > 1 ? 's' : '') : 'none') + (sk.ec && sk.ec.resetCdAtStart ? ' \u00b7 ready at start' : '') + '</dd>';
+      rowsHtml += '<dt>Hits</dt><dd>' + hits + '</dd>';
+      ["SkillAttack1", "SkillAttack2", "SkillAttack3", "SkillAttack4"].forEach(function (k, i) {
+        if (rows[k]) rowsHtml += '<dt>DMG' + (i ? ' ' + (i + 1) : '') + '</dt><dd>' + rows[k].toFixed(1) + '%</dd>';
+      });
+      var flat = flatOf(rows, "fx", "fg", "SkillFixedAttack1", S.slevel, S.rank.name);
+      if (flat) rowsHtml += '<dt>Flat damage</dt><dd>+' + fmt(flat) + '</dd>';
+      if (rows.SkillCureByHp) rowsHtml += '<dt>Heal</dt><dd>' + rows.SkillCureByHp.toFixed(1) + '% max HP</dd>';
+    } else {
+      var pr = sk.props && sk.props[String(S.srank)];
+      if (pr) Object.keys(pr).forEach(function (prop) {
+        if (TRIGGER_DISPLAY.test(prop)) return;
+        var v = curveValue(pr[prop], S.srank, S.slevel, S.rank.name);
+        if (!v) return;
+        var f = PROP2FIELD[prop] || (PROP2RATIO[prop] || [])[0] || PROP2FLAT[prop] || PROP2SCALE[prop];
+        var pct = pr[prop].pct || PROP2SCALE[prop];
+        rowsHtml += '<dt>' + (LABEL[f] || prop) + '</dt><dd>+' + (pct ? v.toFixed(1) + '%' : fmt(v)) + '</dd>';
+      });
+      (sk.passive || []).forEach(function (pv) {
+        var K = { hit: "on your hits", roundStart: "each turn", damaged: "when hit", roundCheck: "on a turn with no Technique", skillStart: "when a skill starts" };
+        rowsHtml += '<dt>Proc</dt><dd>' + (K[pv.kind] || pv.kind) + (pv.rate < 1 ? ' ' + Math.round(pv.rate * 100) + '%' : '') + '</dd>';
+      });
+      if (isCdStartCharm(sk)) rowsHtml += '<dt>At battle start</dt><dd>all Technique CDs ' + cdStartOf([sk]) + '</dd>';
+    }
+    var st = statusTags(sk).replace(/^ &middot; /, "");
+    return head + (rowsHtml ? '<dl class="tt-rows">' + rowsHtml + '</dl>' : '') +
+      (sk.desc ? '<div class="tt-desc">' + sk.desc + '</div>' : '') +
+      (st ? '<div class="tt-st">\u2726 ' + st + '</div>' : '');
+  }
+  function showTip(el) {
+    var side = el.getAttribute("data-side"), slot = parseInt(el.getAttribute("data-slot"), 10);
+    var sk = LOAD[side][slot], tip = $("skilltip");
+    if (!sk) { tip.hidden = true; return; }
+    tip.innerHTML = tipHtml(side, sk); tip.hidden = false;
+    var r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    var x = r.right + 12, y = r.top - 8;
+    if (x + w > window.innerWidth - 8) x = r.left - w - 12;
+    if (x < 8) x = 8;
+    if (y + h > window.innerHeight - 8) y = Math.max(8, window.innerHeight - h - 8);
+    tip.style.left = x + "px"; tip.style.top = y + "px";
+  }
+  function hideTip() { $("skilltip").hidden = true; }
+
   function invalidate() {
     stopPlayback();
     PLAY = null;
@@ -1168,9 +1242,17 @@
     $("pickele").addEventListener("change", function () { fillList($("pickfind").value); });
     SIDE.forEach(function (side) {
       for (var i = 0; i < TECH + CHARM; i++) {
-        (function (s, k) { $(s + "_slot" + k).addEventListener("click", function () { openPicker(s, k); }); })(side, i);
+        (function (s, k) {
+          var el = $(s + "_slot" + k);
+          el.addEventListener("click", function () { hideTip(); openPicker(s, k); });
+          el.addEventListener("mouseenter", function () { showTip(el); });
+          el.addEventListener("mouseleave", hideTip);
+          el.addEventListener("focus", function () { showTip(el); });
+          el.addEventListener("blur", hideTip);
+        })(side, i);
       }
     });
+    window.addEventListener("scroll", hideTip, { passive: true });
     $("pickfind").addEventListener("input", function () { fillList(this.value); });
     $("pickclose").addEventListener("click", function () { $("picker").close(); });
     $("pickclear").addEventListener("click", function () {

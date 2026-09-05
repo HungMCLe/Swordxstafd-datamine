@@ -179,18 +179,26 @@ def render(layout, base_tables, dist: Path, out: Path):
 <div class="wrap wide">
 <p class="eyebrow">Combat mechanics</p>
 <h1>Duel simulator</h1>
-<p class="lede">Pick a class a side, load four Techniques and four Charms from its line &mdash; its own tier and every
+<p class="lede">Pick a class a side &mdash; the sheet fills with a realistic Champion-tier build for that line &mdash; load four Techniques and four Charms from it &mdash; its own tier and every
 tier below it &mdash; tap a slot to change one, then run a thousand
 duels &mdash; or watch one play out action by action on the game's own turn clock, with every hit through
 <code>Damage()</code> and every crit and block rolled.</p>
 
 <div class="arena" id="arena">
   <div class="orderstrip" id="orderstrip" aria-label="Upcoming turn order"></div>
-  <div class="arena-body">
-    {fighter("a", "You")}
-    <div class="vs"><span>VS</span></div>
-    {fighter("b", "Opponent")}
+  <div class="arena-grid">
+    <div class="arena-body">
+      {fighter("a", "You")}
+      <div class="vs"><span>VS</span></div>
+      {fighter("b", "Opponent")}
+    </div>
+    <aside class="sidelog">
+      <h3>Combat log</h3>
+      <ol id="combatlog" class="combatlog" aria-live="polite"><li class="empty">Run the duel, then watch or step
+        &mdash; every cast lands here: who, what, each hit's roll, and anything the statuses or Charms did.</li></ol>
+    </aside>
   </div>
+  <div id="skilltip" class="skilltip" hidden></div>
   <div class="ribbon" id="ribbon" hidden></div>
   <div class="banner" id="banner" hidden></div>
 
@@ -223,12 +231,6 @@ duels &mdash; or watch one play out action by action on the game's own turn cloc
 </div>
 
 <div id="detail" hidden>
-  <div class="logwrap">
-    <h3>Combat log</h3>
-    <p class="calcnote">Fills in as the fight plays. Each line is one action: who, what, every hit with its
-    roll, what it did to the target, and anything the statuses or Charms did on the side.</p>
-    <ol id="combatlog" class="combatlog" aria-live="polite"></ol>
-  </div>
   <div id="hpchart"></div>
   <h3>The fight above, as a table</h3>
   <p class="calcnote">The same seeded run the scene plays. The odds come from a thousand of these with fresh rolls.</p>
