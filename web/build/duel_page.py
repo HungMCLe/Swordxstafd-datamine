@@ -138,18 +138,23 @@ def render(layout, base_tables, dist: Path, out: Path):
     tiers = {}
     for c in class_tree:
         tiers.setdefault(c["tier"], []).append(c["name"])
-    clsopts = "".join(
-        f'<optgroup label="Tier {t}">' +
-        "".join(f'<option value="{html.escape(nm)}"{" selected" if nm == "Archmage" else ""}>{html.escape(nm)}</option>'
-                for nm in names) + "</optgroup>"
-        for t, names in sorted(tiers.items()))
+    # the opening matchup: an Archmage against a Berserker, the two Champion-tier
+    # damage classes of the Mage and Warrior lines
+    DEFAULT_CLASS = {"a": "Archmage", "b": "Berserker"}
+
+    def clsopts(pick):
+        return "".join(
+            f'<optgroup label="Tier {t}">' +
+            "".join(f'<option value="{html.escape(nm)}"{" selected" if nm == pick else ""}>{html.escape(nm)}</option>'
+                    for nm in names) + "</optgroup>"
+            for t, names in sorted(tiers.items()))
 
     def fighter(side, label):
         return f"""
       <section class="fighter" data-side="{side}">
         <div class="nameplate">
           <span class="fname">{label}</span>
-          <select class="fclass" id="{side}_cls" aria-label="{label}: class">{clsopts}</select>
+          <select class="fclass" id="{side}_cls" aria-label="{label}: class">{clsopts(DEFAULT_CLASS[side])}</select>
           <span class="frank" id="{side}_rankname"></span>
         </div>
         <div class="hpbar"><div class="hpfill" id="{side}_hpfill"></div>
@@ -210,7 +215,7 @@ duels &mdash; or watch one play out action by action on the game's own turn cloc
       <option value="1000">1x &mdash; the game's own timing</option><option value="500" selected>2x</option>
       <option value="250">4x</option><option value="0">Instant</option>
     </select>
-    <label class="mirror"><input type="checkbox" id="mirror" checked> mirror my sheet onto the opponent</label>
+    <label class="mirror"><input type="checkbox" id="mirror"> mirror my sheet onto the opponent</label>
     <label class="mirror">Round cap <input type="number" id="maxrounds" value="15" min="0" max="100" class="short">
       <span class="hint">stages use 15, 20 or 30; 0 = none</span></label>
     <label class="mirror">Server age <input type="number" id="serverdays" value="150" min="0" max="400" class="short">
@@ -298,8 +303,10 @@ for hard controls against a higher-ranked target, and Damp raising the odds of F
 turn-with-no-Technique check that Frost Guard uses. Fear, Confusion, Ridicule and Restrict are applied and shown but
 change nothing here &mdash; taunts and movement have no meaning in a 1v1 without a grid.</p>
 <p><b>A turn casts every Technique that is ready.</b> Each goes in slot order and then onto its own cooldown,
-counted in that caster's turns &mdash; so a skill with no cooldown fires every turn, a CD&nbsp;1 skill every other,
-and a turn with three ready skills is three casts. A basic attack happens only when nothing is ready, which is
+counted in that caster's turns. The engine's test is <code>Round &minus; LastRound &gt; CD</code>, so a skill with no
+cooldown fires every turn, a CD&nbsp;1 skill sits out one full turn and returns the turn after, and every skill
+opens the fight on its full cooldown &mdash; a CD&nbsp;2 skill first goes on turn&nbsp;3, or turn&nbsp;2 with Rapid Cast.
+A turn with three ready skills is three casts. A basic attack happens only when nothing is ready, which is
 also when Charms like Frost Guard that key off a Technique-less turn fire. Blind is spent by the first attack of
 the turn. The prefab lists the AI's tie-break priorities for <i>targets</i>, but there is no grid here, so
 range, area and positioning do nothing.</p>

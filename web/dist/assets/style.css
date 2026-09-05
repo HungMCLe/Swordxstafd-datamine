@@ -1,3 +1,4 @@
+[hidden]{display:none!important}
 /* Purrwikimania — Sword x Staff datamined reference
    Palette: indigo night ground, gold for milestones, star-blue for mechanics. */
 
@@ -500,7 +501,7 @@ table.log{font-size:13px} table.log td{padding:6px 12px}
   .fighter .slot{width:52px;height:52px;margin-bottom:24px}
   .fighter .slot .slotcap{width:74px;font-size:9px}
   .fighter .slot .starbadge{min-width:20px;height:16px;font-size:9px;line-height:16px;top:-5px;left:-5px}
-  .fighter .slot .cdov{font-size:17px}
+.fighter .slot .cdov{font-size:17px}
   .fname{font-size:14px}
 }
 .fighter .slot .slotlv{white-space:nowrap}
