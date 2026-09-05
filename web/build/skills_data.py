@@ -644,7 +644,12 @@ def main():
                         row["fg"] = sk["lgroup"]["SkillFixedAttack1"]
                     if row:
                         per[str(rk)] = row
-                duel.append({"id": sk["id"], "name": sk["name"], "cls": c["name"],
+                _ep = eps.get(sk.get("entity") or 0) or {}
+                try:
+                    _pvp = int((_ep.get("PvpPropScale") or "10000").strip() or 10000)
+                except Exception:
+                    _pvp = 10000
+                duel.append({"id": sk["id"], "name": sk["name"], "cls": c["name"], "pvp": _pvp,
                              "tier": t["tier"], "ele": m.group(1) if m else "Physical",
                              "hits": max(1, min(hits, 20)), "r": per,
                              "kind": sk["type"], "props": charm_props(sk)})

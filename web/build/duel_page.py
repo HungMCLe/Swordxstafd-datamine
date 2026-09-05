@@ -7,7 +7,8 @@ from pathlib import Path
 BASE_COLS = ["BaseElementMaster", "BaseElementResistance", "BaseKongFuMaster",
              "BaseKongFuResistance", "BaseCritRatePercentValue", "BaseCritAvoidPercentValue",
              "BaseBlockPercentValue", "BaseBlockAvoidPercentValue",
-             "BaseElementAdd", "BaseElementReduce", "BaseEffectRate", "BaseEffectDodge"]
+             "BaseElementAdd", "BaseElementReduce", "BaseEffectRate", "BaseEffectDodge",
+             "PlayerSkillDmgReduceScale", "ProSkillDmgReduceScale"]
 
 # a compact sheet: only what actually moves the result
 FIELDS = [
@@ -30,6 +31,8 @@ FIELDS = [
     ("acc", "Accuracy", 37700, "", "1000"),
     ("erate", "Effect Hit Rate", 13100, "lands your statuses", "500"),
     ("edodge", "Effect RES", 63600, "resists theirs", "500"),
+    ("pvpadd", "PvP Bonus DMG", 9.6, "%", "0.5"),
+    ("pvpres", "PvP DMG RES", 9.6, "%", "0.5"),
 ]
 
 
@@ -168,6 +171,7 @@ duels &mdash; or watch one play out action by action on the game's own turn cloc
     <div class="vs"><span>VS</span></div>
     {fighter("b", "Opponent")}
   </div>
+  <div class="ribbon" id="ribbon" hidden></div>
   <div class="banner" id="banner" hidden></div>
 
   <div class="playbar">
@@ -175,8 +179,8 @@ duels &mdash; or watch one play out action by action on the game's own turn cloc
     <button type="button" id="play" class="pickbtn" disabled>&#9654; Watch one fight</button>
     <button type="button" id="step" class="pickbtn" disabled>Step</button>
     <select id="speed" aria-label="Playback speed">
-      <option value="900">1x</option><option value="450" selected>2x</option>
-      <option value="220">4x</option><option value="0">Instant</option>
+      <option value="1000">1x &mdash; the game's own timing</option><option value="500" selected>2x</option>
+      <option value="250">4x</option><option value="0">Instant</option>
     </select>
     <label class="mirror"><input type="checkbox" id="mirror" checked> mirror my sheet onto the opponent</label>
     <label class="mirror">Round cap <input type="number" id="maxrounds" value="15" min="0" max="100" class="short">
@@ -197,6 +201,12 @@ duels &mdash; or watch one play out action by action on the game's own turn cloc
 </div>
 
 <div id="detail" hidden>
+  <div class="logwrap">
+    <h3>Combat log</h3>
+    <p class="calcnote">Fills in as the fight plays. Each line is one action: who, what, every hit with its
+    roll, what it did to the target, and anything the statuses or Charms did on the side.</p>
+    <ol id="combatlog" class="combatlog" aria-live="polite"></ol>
+  </div>
   <div id="hpchart"></div>
   <h3>The fight above, as a table</h3>
   <p class="calcnote">The same seeded run the scene plays. The odds come from a thousand of these with fresh rolls.</p>
@@ -233,6 +243,14 @@ each hit reads (Lion Combo is <code>SkillAttack1, SkillAttack1, SkillAttack2</co
 <code>Damage()</code> with crit and block <i>rolled</i> per hit, block cancelling crit exactly as
 <code>CalcDamageTypeImpl</code> does. Charms are folded into the sheet through
 <code>CalcSkillPassiveProps</code>, and the scene says which of their effects it could not use.</p>
+<p><b>It is a PvP fight, and Damage() knows.</b> Damage from a player is divided by the target's
+<code>PlayerSkillDmgReduceScale</code> and again by <code>ProSkillDmgReduceScale</code>, both per-rank bases
+from <code>level_prop_battle_extra</code> &mdash; at Champion III that is &divide;1.14 and &divide;1.31, so
+player damage is roughly halved before anything else. The sheet's PvP Bonus DMG and PvP DMG RES join the
+percentage block, and the few skills with a <code>PvpPropScale</code> under 100% are scaled by it.</p>
+<p><b>Timing is the prefab's.</b> Every hit carries the moment it lands (<code>HitCfg.Delay</code>): Eclipse
+Slash's six cuts fall at 0.3, 0.4, 0.78, 0.9, 1.04 and 1.48 seconds; Divine Wrath's sixteen from 0.85 to 2.24.
+At 1x the scene plays them at that pace.</p>
 <p><b>Statuses, from the prefabs.</b> Every hit's damage entity lists the statuses it applies
 (<code>FightDamageComponent.StatusList</code>: id, base chance, whether Effect Hit Rate and Effect RES modify it),
 and each status entity says what it is. The fight now runs them: <b>stat buffs and debuffs</b> from
