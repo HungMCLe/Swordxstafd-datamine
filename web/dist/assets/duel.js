@@ -1,4 +1,5 @@
-/* Duel simulator: SpeedToTime for the clock, Damage() for every hit. */
+/* Duel simulator: SpeedToTime for the clock, Damage() for every hit,
+   and a scene that plays one fight back action by action. */
 (function () {
   "use strict";
   var C;
@@ -12,6 +13,7 @@
   var FIELDS = ["hp", "atk", "def", "spd", "mast", "kfm", "aff", "eres", "aegis",
                 "cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "acc"];
   var A_COL = "#b8863b", B_COL = "#3d6ea8";
+  var SIDE = ["a", "b"], WHO = ["You", "Opponent"];
 
   function n(id) { var el = $(id); if (!el) return 0; var v = parseFloat(el.value); return isFinite(v) ? v : 0; }
 
@@ -143,8 +145,8 @@
       });
     } else {
       var coef = ((row.SkillAttack1 || 0) + (row.SkillAttack2 || 0) + (row.SkillAttack3 || 0) + (row.SkillAttack4 || 0)) / 100;
-      var n = sk.hits || 1, per = (att.atk * coef + flat) * scale / n;
-      for (var k = 0; k < n; k++) hits.push(per);
+      var cnt = sk.hits || 1, per = (att.atk * coef + flat) * scale / cnt;
+      for (var k = 0; k < cnt; k++) hits.push(per);
     }
     return { hits: hits, heal: 0 };
   }
@@ -164,20 +166,20 @@
   }
 
   function oneFight(A, B, loadA, loadB, rng, wantLog, maxRounds) {
-    function side(S, load, name) {
+    function side(S, load, idx) {
       var techs = load.slice(0, TECH);
       return {
-        s: S, load: techs, hp: S.hp, t: interval(S), name: name, turns: 0,
+        s: S, load: techs, hp: S.hp, t: interval(S), idx: idx, turns: 0,
         /* InitLastRound: a skill with a cooldown starts ON cooldown unless it is
            ResetCDAtStart — the "Zero Initial CD" keyword — in which case it is ready. */
         cd: techs.map(function (sk) { return !sk ? 0 : (sk.ec && sk.ec.resetCdAtStart ? 0 : cdOf(sk, S.srank)); }),
         uses: techs.map(function () { return 0; })
       };
     }
-    var sides = [side(A, loadA, "You"), side(B, loadB, "Opponent")];
-    var log = [], turns = 0, MAXT = 600;
+    var sides = [side(A, loadA, 0), side(B, loadB, 1)];
+    var log = [], turns = 0, MAXT = 600, capped = false;
     while (sides[0].hp > 0 && sides[1].hp > 0 && turns < MAXT) {
-      if (maxRounds > 0 && Math.min(sides[0].turns, sides[1].turns) >= maxRounds) break;
+      if (maxRounds > 0 && Math.min(sides[0].turns, sides[1].turns) >= maxRounds) { capped = true; break; }
       var gap = sides[0].t - sides[1].t;
       var i = Math.abs(gap) < 1e-9 ? (rng() < 0.5 ? 0 : 1) : (gap < 0 ? 0 : 1);
       var me = sides[i], foe = sides[1 - i];
@@ -195,24 +197,28 @@
       var parts = hitParts(me.s, foe.s, pick);
       var p = critChance(me.s, foe.s), m = critMult(me.s, foe.s);
       var b = blockChance(me.s, foe.s), bd = blockDiv(foe.s);
-      var total = 0;
+      var total = 0, rolled = [];
       parts.hits.forEach(function (d) {
-        if (rng() < b) d /= bd;                 /* block cancels crit */
-        else if (rng() < p) d *= m;
+        var crit = false, block = false;
+        if (rng() < b) { d /= bd; block = true; }          /* block cancels crit */
+        else if (rng() < p) { d *= m; crit = true; }
         total += d;
+        if (wantLog) rolled.push({ d: d, crit: crit, block: block });
       });
       foe.hp -= total;
       if (parts.heal) me.hp = Math.min(me.s.hp, me.hp + parts.heal);
       if (slot >= 0) { me.cd[slot] = cdOf(pick, me.s.srank); me.uses[slot]++; }
-      if (wantLog && log.length < 60) {
-        log.push({ t: Math.round(me.t), who: me.name,
-                   skill: pick.name + (parts.heal ? " (heals " + fmt(parts.heal) + ")" : ""),
-                   dmg: total, left: Math.max(0, foe.hp) });
+      if (wantLog) {
+        log.push({ t: Math.round(me.t), side: i, who: WHO[i], slot: slot, skill: pick.name,
+                   skillId: pick.id, ele: pick.ele, hits: rolled, dmg: total, heal: parts.heal || 0,
+                   turn: me.turns, cd: me.cd.slice(),
+                   hpA: Math.max(0, sides[0].hp), hpB: Math.max(0, sides[1].hp),
+                   left: Math.max(0, foe.hp) });
       }
       me.t += interval(me.s);
     }
-    return { winner: sides[0].hp <= 0 ? 1 : (sides[1].hp <= 0 ? 0 : -1), turns: turns, log: log,
-             hpA: Math.max(0, sides[0].hp), hpB: Math.max(0, sides[1].hp) };
+    return { winner: sides[0].hp <= 0 ? 1 : (sides[1].hp <= 0 ? 0 : -1), capped: capped,
+             turns: turns, log: log, hpA: Math.max(0, sides[0].hp), hpB: Math.max(0, sides[1].hp) };
   }
 
   function mulberry(seed) {
@@ -230,19 +236,30 @@
     return Math.round(v).toString();
   }
 
+  /* ---------- the run ---------- */
+  var PLAY = null;   /* { A, B, sample } for the scene */
+
+  function currentSheets() {
+    var A = sheet("a"), B;
+    if ($("mirror").checked) { B = JSON.parse(JSON.stringify(A)); B.rank = A.rank; }
+    else B = sheet("b");
+    var loadB = $("mirror").checked ? LOAD.a.slice() : LOAD.b;
+    return { A: A, B: B, loadA: LOAD.a, loadB: loadB };
+  }
+
   function run() {
     if (!DATA || !CURVES) return;
-    var A = sheet("a"), B = $("mirror").checked ? sheet("a") : sheet("b");
-    if ($("mirror").checked) { B = JSON.parse(JSON.stringify(A)); B.rank = A.rank; }
-    var loadA = LOAD.a, loadB = $("mirror").checked ? LOAD.a.slice() : LOAD.b;
+    stopPlayback();
+    var cs = currentSheets(), A = cs.A, B = cs.B;
     var N = 1000, winA = 0, draws = 0, turnList = [], rng = mulberry(12345);
     var maxR = parseInt(($("maxrounds") || {}).value, 10) || 0;
     for (var i = 0; i < N; i++) {
-      var r = oneFight(A, B, loadA, loadB, rng, false, maxR);
+      var r = oneFight(A, B, cs.loadA, cs.loadB, rng, false, maxR);
       if (r.winner === 0) winA++; else if (r.winner < 0) draws++;
       turnList.push(r.turns);
     }
-    var sample = oneFight(A, B, loadA, loadB, mulberry(999), true, maxR);
+    var sample = oneFight(A, B, cs.loadA, cs.loadB, mulberry(999), true, maxR);
+    PLAY = { A: A, B: B, sample: sample, i: 0, timer: null };
     turnList.sort(function (x, y) { return x - y; });
     var med = turnList[Math.floor(turnList.length / 2)];
     var pa = winA / N, pb = (N - winA - draws) / N;
@@ -253,16 +270,21 @@
     $("oddsb").textContent = pb >= 0.08 ? (pb * 100).toFixed(0) + "% Opponent" : "";
     $("oddstext").innerHTML = "<b>You win " + (pa * 100).toFixed(1) + "%</b> of 1,000 duels" +
       (draws ? ", " + (draws / N * 100).toFixed(1) + "% hit the round cap with both alive" : "") +
-      ". Median fight length <b>" + med + " turns</b>. Your interval is <b>" +
+      ". Median fight length <b>" + med + " actions</b>. Your interval is <b>" +
       Math.round(interval(A)) + "</b> against theirs of <b>" + Math.round(interval(B)) +
       "</b>, so you act " + (interval(B) / interval(A)).toFixed(2) + "x as often.";
     var rows = sample.log.map(function (l) {
-      return "<tr><td class=num>" + l.t + "</td><td>" + l.who + "</td><td>" + l.skill +
-        "</td><td class=num>" + fmt(l.dmg) + "</td><td class=num>" + fmt(l.left) + "</td></tr>";
+      var hits = l.hits.map(function (h) { return h.block ? "B" : (h.crit ? "C" : "·"); }).join("");
+      return "<tr><td class=num>" + l.t + "</td><td class=num>" + l.turn + "</td><td>" + l.who +
+        "</td><td>" + l.skill + (l.heal ? " <i>(heals " + fmt(l.heal) + ")</i>" : "") +
+        '</td><td class="mono">' + hits + "</td><td class=num>" + fmt(l.dmg) + "</td><td class=num>" + fmt(l.left) + "</td></tr>";
     }).join("");
-    $("logbody").innerHTML = rows || '<tr><td colspan="5">no actions</td></tr>';
+    $("logbody").innerHTML = rows || '<tr><td colspan="7">no actions</td></tr>';
+    $("detail").hidden = false;
     drawHp(sample, A, B);
     charmReport(A);
+    sceneReset();
+    $("play").disabled = false; $("step").disabled = false;
   }
 
   var LABEL = { hp: "HP", atk: "ATK", def: "DEF", spd: "SPD", mast: "Elemental Mastery",
@@ -279,7 +301,7 @@
     });
     var skipped = Object.keys(A.ignored);
     var html = added.length
-      ? "Your Charms add " + added.join(", ") + " to the sheet above."
+      ? "Your Charms add " + added.join(", ") + " to the sheet."
       : "Your Charms add nothing this model uses.";
     if (skipped.length) {
       html += " They also give " + skipped.join(", ") +
@@ -290,11 +312,10 @@
 
   function drawHp(sample, A, B) {
     var W = 680, H = 240, pl = 62, pr = 16, pb = 34, pt = 16;
-    var hp = { You: A.hp, Opponent: B.hp }, seriesA = [[0, 1]], seriesB = [[0, 1]];
+    var seriesA = [[0, 1]], seriesB = [[0, 1]];
     sample.log.forEach(function (l, i) {
-      if (l.who === "You") { hp.Opponent = l.left; } else { hp.You = l.left; }
-      seriesA.push([i + 1, Math.max(0, hp.You / A.hp)]);
-      seriesB.push([i + 1, Math.max(0, hp.Opponent / B.hp)]);
+      seriesA.push([i + 1, Math.max(0, l.hpA / A.hp)]);
+      seriesB.push([i + 1, Math.max(0, l.hpB / B.hp)]);
     });
     var x1 = Math.max(1, seriesA.length - 1);
     var px = function (x) { return pl + x / x1 * (W - pl - pr); };
@@ -318,15 +339,192 @@
       '<span class="key"><i style="background:' + B_COL + '"></i>Opponent</span></div></figure>';
   }
 
-  /* ---------- slot picker ---------- */
-  var current = null;
+  /* ---------- the scene ---------- */
+  function rankBadge(srank) {
+    var lab = C.rankLabels[String(srank)] || "", q = C.rankQuality[String(srank)] || "";
+    var m = /\+(\d+)/.exec(lab);
+    return { stars: m ? parseInt(m[1], 10) : 0, quality: q, label: lab };
+  }
+
   function paint(side, slot) {
     var el = $(side + "_slot" + slot), sk = LOAD[side][slot];
-    if (!sk) { el.className = "slot " + (slot >= TECH ? "charm" : "tech"); el.innerHTML = '<span class="slotnum">' + (slot + 1) + '</span>'; return; }
-    el.className = "slot filled " + (slot >= TECH ? "charm" : "tech") + " ele-" + sk.ele.toLowerCase();
-    el.innerHTML = '<img src="../assets/skills/skill_' + sk.id + '.png" alt="" width="44" height="44" loading="lazy">' +
-      '<span class="slotname">' + sk.name + '</span>';
+    var kind = slot >= TECH ? "charm" : "tech";
+    if (!sk) {
+      el.className = "slot " + kind;
+      el.innerHTML = '<span class="slotnum">' + (slot % TECH + 1) + '</span>';
+      return;
+    }
+    var rb = rankBadge(Math.round(n(side + "_srank")));
+    el.className = "slot filled " + kind + " ele-" + sk.ele.toLowerCase() + " q-" + rb.quality.toLowerCase();
+    el.innerHTML =
+      '<img src="../assets/skills/skill_' + sk.id + '.png" alt="" width="52" height="52" loading="lazy">' +
+      '<span class="starbadge" title="' + rb.label + '">' + (rb.stars ? "★" + rb.stars : "★") + '</span>' +
+      '<span class="cdov" hidden></span>' +
+      '<span class="slotcap">' + sk.name + '</span>' +
+      '<span class="slotlv">Lv. ' + Math.round(n(side + "_slevel")) + '</span>';
   }
+
+  function paintAll() {
+    SIDE.forEach(function (s) { for (var i = 0; i < TECH + CHARM; i++) paint(s, i); });
+    portraits();
+  }
+
+  function classOf(side) {
+    var tally = {};
+    LOAD[side].forEach(function (sk) { if (sk) tally[sk.cls] = (tally[sk.cls] || 0) + 1; });
+    var best = null;
+    Object.keys(tally).forEach(function (c) { if (!best || tally[c] > tally[best]) best = c; });
+    return best;
+  }
+
+  function portraits() {
+    SIDE.forEach(function (side) {
+      var cls = classOf(side), el = $(side + "_portrait"), icon = cls ? C.classIcon[cls] : null;
+      var first = LOAD[side].filter(function (x) { return x && x.kind === "Technique"; })[0];
+      if (icon) {
+        el.innerHTML = '<img src="../assets/skills/class_' + icon + '.png" alt="' + cls + '">';
+      } else if (first) {
+        el.innerHTML = '<img src="../assets/skills/skill_' + first.id + '.png" alt="">';
+      } else {
+        el.innerHTML = '<span class="medallion-empty">?</span>';
+      }
+      $(side + "_class").textContent = cls || "";
+      var r = C.ranks[parseInt($(side + "_rank").value, 10)];
+      $(side + "_rankname").textContent = r ? r.name : "";
+    });
+  }
+
+  function hpSet(side, cur, max, animate) {
+    var f = $(side + "_hpfill"), pct = Math.max(0, Math.min(1, cur / max));
+    f.style.transition = animate ? "width .45s ease" : "none";
+    f.style.width = (pct * 100).toFixed(1) + "%";
+    f.className = "hpfill" + (pct < 0.25 ? " low" : pct < 0.5 ? " mid" : "");
+    $(side + "_hptext").textContent = fmt(Math.max(0, cur)) + " / " + fmt(max);
+  }
+
+  function cdPaint(side, cd) {
+    for (var k = 0; k < TECH; k++) {
+      var el = $(side + "_slot" + k), ov = el.querySelector(".cdov");
+      if (!ov) continue;
+      var v = cd ? cd[k] : 0;
+      ov.hidden = !v; ov.textContent = v || "";
+      el.classList.toggle("cooling", !!v);
+    }
+  }
+
+  function orderStrip(from) {
+    if (!PLAY) { $("orderstrip").innerHTML = ""; return; }
+    var log = PLAY.sample.log, out = "";
+    for (var i = from; i < Math.min(log.length, from + 10); i++) {
+      var l = log[i];
+      out += '<span class="ord ' + SIDE[l.side] + (i === from ? " now" : "") + '" title="' + l.who + " — " + l.skill + '">' +
+        (l.skillId ? '<img src="../assets/skills/skill_' + l.skillId + '.png" alt="">' : '<b>' + l.who[0] + '</b>') +
+        '</span>';
+    }
+    if (from >= log.length) out = '<span class="ordend">end of fight</span>';
+    $("orderstrip").innerHTML = out;
+  }
+
+  function float(side, text, cls) {
+    var box = $(side + "_floats"), el = document.createElement("span");
+    el.className = "float " + (cls || "");
+    el.textContent = text;
+    el.style.left = (18 + Math.random() * 64) + "%";
+    box.appendChild(el);
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 1400);
+  }
+
+  function sceneReset() {
+    if (!PLAY) return;
+    hpSet("a", PLAY.A.hp, PLAY.A.hp, false);
+    hpSet("b", PLAY.B.hp, PLAY.B.hp, false);
+    var first = PLAY.sample.log[0];
+    /* opening cooldowns: what the fight starts with, before anyone acts */
+    SIDE.forEach(function (s, idx) {
+      var load = idx === 0 ? LOAD.a : ($("mirror").checked ? LOAD.a : LOAD.b);
+      var S = idx === 0 ? PLAY.A : PLAY.B;
+      cdPaint(s, load.slice(0, TECH).map(function (sk) {
+        return !sk ? 0 : (sk.ec && sk.ec.resetCdAtStart ? 0 : cdOf(sk, S.srank));
+      }));
+      $(s + "_callout").textContent = "";
+      $(s + "_floats").innerHTML = "";
+    });
+    document.querySelectorAll(".slot.acting").forEach(function (e) { e.classList.remove("acting"); });
+    $("banner").hidden = true;
+    PLAY.i = 0;
+    orderStrip(0);
+    void first;
+  }
+
+  function stepOnce() {
+    if (!PLAY) return false;
+    var log = PLAY.sample.log;
+    if (PLAY.i >= log.length) { finish(); return false; }
+    var l = log[PLAY.i], me = SIDE[l.side], foe = SIDE[1 - l.side];
+    document.querySelectorAll(".slot.acting").forEach(function (e) { e.classList.remove("acting"); });
+    if (l.slot >= 0) {
+      var el = $(me + "_slot" + l.slot);
+      el.classList.add("acting");
+    }
+    $(me + "_callout").innerHTML = '<span class="ele-' + l.ele.toLowerCase() + '">' + l.skill + '</span>' +
+      '<small>turn ' + l.turn + '</small>';
+    /* one floating number per hit, staggered */
+    l.hits.forEach(function (h, k) {
+      setTimeout(function () {
+        float(foe, "−" + fmt(h.d) + (h.crit ? " CRIT" : h.block ? " BLOCK" : ""), h.crit ? "crit" : h.block ? "block" : "");
+      }, Math.min(k * 45, 500));
+    });
+    if (l.heal) float(me, "+" + fmt(l.heal), "heal");
+    hpSet("a", l.hpA, PLAY.A.hp, true);
+    hpSet("b", l.hpB, PLAY.B.hp, true);
+    cdPaint(me, l.cd);
+    PLAY.i++;
+    orderStrip(PLAY.i);
+    if (PLAY.i >= log.length) { setTimeout(finish, 500); return false; }
+    return true;
+  }
+
+  function finish() {
+    if (!PLAY) return;
+    var s = PLAY.sample, b = $("banner");
+    b.hidden = false;
+    b.className = "banner " + (s.winner === 0 ? "wina" : s.winner === 1 ? "winb" : "draw");
+    b.innerHTML = s.winner === 0 ? "You win" : s.winner === 1 ? "Opponent wins"
+      : (s.capped ? "Round cap reached &mdash; both standing" : "No result");
+    stopPlayback(true);
+  }
+
+  function stopPlayback(keepButtons) {
+    if (PLAY && PLAY.timer) { clearTimeout(PLAY.timer); PLAY.timer = null; }
+    $("play").innerHTML = "&#9654; Watch one fight";
+    if (!keepButtons) { $("play").disabled = !PLAY; $("step").disabled = !PLAY; }
+  }
+
+  function playLoop() {
+    if (!PLAY) return;
+    var ms = parseInt($("speed").value, 10);
+    if (ms === 0) {          /* instant: jump to the final state */
+      while (PLAY.i < PLAY.sample.log.length) {
+        var l = PLAY.sample.log[PLAY.i]; PLAY.i++;
+        hpSet("a", l.hpA, PLAY.A.hp, false); hpSet("b", l.hpB, PLAY.B.hp, false);
+        cdPaint(SIDE[l.side], l.cd);
+      }
+      orderStrip(PLAY.i); finish(); return;
+    }
+    if (!stepOnce()) return;
+    PLAY.timer = setTimeout(playLoop, ms);
+  }
+
+  function togglePlay() {
+    if (!PLAY) return;
+    if (PLAY.timer) { stopPlayback(); return; }
+    if (PLAY.i >= PLAY.sample.log.length) sceneReset();
+    $("play").innerHTML = "&#10074;&#10074; Pause";
+    playLoop();
+  }
+
+  /* ---------- slot picker ---------- */
+  var current = null;
   function openPicker(side, slot) {
     current = { side: side, slot: slot };
     $("pickfind").value = "";
@@ -350,12 +548,16 @@
       DATA.skills.filter(function (s) { return s.kind === want; }).length;
     var out = matches.slice(0, 200).map(function (s) {
       var on = LOAD[current.side].some(function (x, k) { return x && x.id === s.id && k !== current.slot; });
+      var cdrow = s.r && s.r["22"] ? s.r["22"].CD : 0;
       return '<button type="button" class="pick' + (on ? " equipped" : "") + '" data-id="' + s.id + '">' +
         '<img src="../assets/skills/skill_' + s.id + '.png" alt="" width="34" height="34" loading="lazy">' +
         '<span class="pn">' + s.name + '</span>' +
         '<span class="pm">' + s.cls + ' &middot; T' + s.tier +
-        (s.kind === "Technique" ? ' &middot; ' + s.ele + (s.hits > 1 ? ' &middot; ' + s.hits + ' hits' : '')
-                                 : ' &middot; Charm') +
+        (s.kind === "Technique"
+          ? ' &middot; ' + s.ele + (s.hits > 1 ? ' &middot; ' + s.hits + ' hits' : '') +
+            (cdrow ? ' &middot; CD ' + cdrow : ' &middot; no CD') +
+            (s.ec && s.ec.resetCdAtStart ? ' &middot; ready at start' : '')
+          : ' &middot; Charm') +
         (on ? ' &middot; <b>equipped &mdash; picking moves it here</b>' : '') + '</span></button>';
     }).join("");
     $("picklist").innerHTML = out || '<p class="pickempty">Nothing matches.</p>';
@@ -383,11 +585,25 @@
     $("pickele").innerHTML = eh;
   }
 
+  function invalidate() {
+    /* any change to loadout or sheet makes the last run stale */
+    stopPlayback();
+    PLAY = null;
+    $("play").disabled = true; $("step").disabled = true;
+    $("banner").hidden = true;
+    $("orderstrip").innerHTML = '<span class="ordend">run the duel to see the order of play</span>';
+    document.querySelectorAll(".slot.acting").forEach(function (e) { e.classList.remove("acting"); });
+    SIDE.forEach(function (s) { cdPaint(s, null); $(s + "_callout").textContent = ""; });
+    var A = sheet("a"), B = $("mirror").checked ? A : sheet("b");
+    hpSet("a", A.hp, A.hp, false); hpSet("b", B.hp, B.hp, false);
+    portraits();
+  }
+
   function boot() {
     buildFilters();
     $("pickclass").addEventListener("change", function () { fillList($("pickfind").value); });
     $("pickele").addEventListener("change", function () { fillList($("pickfind").value); });
-    ["a", "b"].forEach(function (side) {
+    SIDE.forEach(function (side) {
       for (var i = 0; i < TECH + CHARM; i++) {
         (function (s, k) {
           $(s + "_slot" + k).addEventListener("click", function () { openPicker(s, k); });
@@ -397,7 +613,7 @@
     $("pickfind").addEventListener("input", function () { fillList(this.value); });
     $("pickclose").addEventListener("click", function () { $("picker").close(); });
     $("pickclear").addEventListener("click", function () {
-      if (current) { LOAD[current.side][current.slot] = null; paint(current.side, current.slot); }
+      if (current) { LOAD[current.side][current.slot] = null; paint(current.side, current.slot); invalidate(); }
       $("picker").close();
     });
     $("picklist").addEventListener("click", function (ev) {
@@ -415,17 +631,27 @@
       }
       LOAD[current.side][current.slot] = picked;
       paint(current.side, current.slot);
+      invalidate();
       $("picker").close();
     });
     $("run").addEventListener("click", run);
+    $("play").addEventListener("click", togglePlay);
+    $("step").addEventListener("click", function () { stopPlayback(); if (PLAY && PLAY.i >= PLAY.sample.log.length) sceneReset(); stepOnce(); });
     $("reset").addEventListener("click", function () {
       try { localStorage.removeItem("pw_duel"); } catch (e) {}
       location.reload();
     });
     $("mirror").addEventListener("change", function () {
-      document.querySelector('.duelside[data-side="b"]').classList.toggle("dimmed", this.checked);
+      document.querySelector('.fighter[data-side="b"]').classList.toggle("dimmed", this.checked);
+      document.querySelector('.duelstats details:nth-of-type(2)').classList.toggle("dimmed", this.checked);
+      invalidate();
     });
-    document.querySelector('.duelside[data-side="b"]').classList.add("dimmed");
+    document.querySelector('.fighter[data-side="b"]').classList.add("dimmed");
+    document.querySelector('.duelstats details:nth-of-type(2)').classList.add("dimmed");
+    /* sheet edits: repaint level/rank badges and mark the run stale */
+    document.querySelectorAll(".duelstats input, .duelstats select").forEach(function (el) {
+      el.addEventListener("change", function () { paintAll(); invalidate(); });
+    });
   }
 
   Promise.all([
@@ -434,10 +660,15 @@
   ]).then(function (v) {
     DATA = v[0]; CURVES = v[1];
     boot();
-    /* a sensible opening loadout: the first few Techniques of a mid tier */
-    var t3 = DATA.skills.filter(function (s) { return s.tier === 3 && s.kind === "Technique"; }).slice(0, TECH);
-    var c3 = DATA.skills.filter(function (s) { return s.tier === 3 && s.kind === "Charm" && s.props && Object.keys(s.props).length; }).slice(0, CHARM);
-    t3.concat(c3).forEach(function (s, i) { LOAD.a[i] = s; LOAD.b[i] = s; paint("a", i); paint("b", i); });
+    /* a sensible opening loadout: an Archmage kit, since the default sheet is one */
+    var names = ["Divine Wrath", "Aqua Vortex", "Howling Hurricane", "Fire Blast",
+                 "Rapid Cast", "Frost Guard", "Incarnation of Light", "Radiant Sear"];
+    names.forEach(function (nm, i) {
+      var s = DATA.skills.filter(function (x) { return x.name === nm; })[0];
+      if (s) { LOAD.a[i] = s; LOAD.b[i] = s; }
+    });
+    paintAll();
+    invalidate();
     $("run").disabled = false;
   }).catch(function () {
     $("run").textContent = "Could not load skill data";
