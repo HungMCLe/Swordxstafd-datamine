@@ -10,6 +10,8 @@ web/
     charts.py     inline-SVG line and bar charts (no library)
     calc_page.py  'Where your next point goes' — marginal damage per stat
     duel_page.py  duel simulator page
+    ec_data.py    walks the decoded EC prefabs: skill -> hits -> damage -> statuses,
+                  charm procs, trigger skills; feeds _duel.json
     site.py       entry point — remaining pages + main()
     skills_data.py    builds out/_skills.json (tier -> class -> skill, per-quality stats)
     skills_page.py    renders the skills page
@@ -35,7 +37,8 @@ Needs the extracted data in `../out/` (not committed — it is ~3 GB and contain
 ```bash
 pip install xxhash pillow
 cd web/build
-python skills_data.py   # regenerates out/_skills.json
+python ../../tools/06_ec_decode.py   # once: decodes the EC prefabs to out/ec_decoded/
+python skills_data.py   # regenerates out/_skills.json and out/_duel.json
 python site.py
 ```
 
@@ -49,6 +52,7 @@ That regenerates every page into `web/dist/`. Commit the result; Vercel deploys 
 | Elemental / crit tables | `out/config_decrypted/level_prop_battle_extra` + `player_subrank` + `role_prop_group` |
 | Top-up ladder | `out/config_decrypted/accumulated_pay_award` |
 | Skills | `profession_base` + `skill` + `skill_rank` (34 ranks -> quality +N) + `entity_prop_skill` / `entity_prop_status` / `PassivePropFactors` (factors) + `entity_prop_group_level` -> the growth curves listed in **`level_prop_files`** |
+| Duel | everything above plus `out/ec_decoded/*.json` (from `tools/06_ec_decode.py`): hit trees, `FightDamageComponent.StatusList`, status entities (`FightStatusComponent`, prop/falloff/shield/end/round-start components), charm passive triggers |
 | Every name | `out/localization/text_en_US.bytes`, looked up by `XXHash64(key, seed=0)` |
 
 `level_prop_files` is the game's own manifest of which `level_prop_*` CSVs are baked into

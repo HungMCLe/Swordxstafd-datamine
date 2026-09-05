@@ -7,7 +7,7 @@ from pathlib import Path
 BASE_COLS = ["BaseElementMaster", "BaseElementResistance", "BaseKongFuMaster",
              "BaseKongFuResistance", "BaseCritRatePercentValue", "BaseCritAvoidPercentValue",
              "BaseBlockPercentValue", "BaseBlockAvoidPercentValue",
-             "BaseElementAdd", "BaseElementReduce"]
+             "BaseElementAdd", "BaseElementReduce", "BaseEffectRate", "BaseEffectDodge"]
 
 # a compact sheet: only what actually moves the result
 FIELDS = [
@@ -28,6 +28,8 @@ FIELDS = [
     ("blockrate", "Block Rate", 11.4, "%", "1"),
     ("blockeff", "Block Efficiency", 100, "%", "5"),
     ("acc", "Accuracy", 37700, "", "1000"),
+    ("erate", "Effect Hit Rate", 13100, "lands your statuses", "500"),
+    ("edodge", "Effect RES", 63600, "resists theirs", "500"),
 ]
 
 
@@ -108,7 +110,9 @@ def render(layout, base_tables, dist: Path, out: Path):
           <span class="frank" id="{side}_rankname"></span>
         </div>
         <div class="hpbar"><div class="hpfill" id="{side}_hpfill"></div>
+          <div class="shfill" id="{side}_shfill" hidden></div>
           <span class="hptext" id="{side}_hptext"></span></div>
+        <div class="statusrow" id="{side}_status" aria-live="polite"></div>
         <div class="fighter-row">
           <div class="slotcol" aria-label="Techniques">{slots(side, "tech", 0, 4)}</div>
           <div class="medallion" id="{side}_portrait"><span class="medallion-empty">?</span></div>
@@ -208,13 +212,20 @@ each hit reads (Lion Combo is <code>SkillAttack1, SkillAttack1, SkillAttack2</co
 <code>Damage()</code> with crit and block <i>rolled</i> per hit, block cancelling crit exactly as
 <code>CalcDamageTypeImpl</code> does. Charms are folded into the sheet through
 <code>CalcSkillPassiveProps</code>, and the scene says which of their effects it could not use.</p>
-<p><b>Known over-estimate:</b> random-target multi-hit skills. Divine Wrath's text says damage falls 40% for each
-repeat hit on the same target, and in a 1v1 every hit is a repeat. That decay is not in the decoded prefab
-fields, so here all sixteen hits land in full &mdash; treat its numbers as a ceiling.</p>
-<p><b>Decoded but not yet simulated:</b> status effects. The prefabs carry every status's duration in rounds, its
-Buff/Debuff type, the chance each hit applies it (Starlight Burst: 30% Blind), and what fires when it ends
-(Icebound heals on expiry). Those are the next thing to wire in; until then Charms that grant reflect, shields
-or status damage are doing less here than in game, and the scene tells you so.</p>
+<p><b>Statuses, from the prefabs.</b> Every hit's damage entity lists the statuses it applies
+(<code>FightDamageComponent.StatusList</code>: id, base chance, whether Effect Hit Rate and Effect RES modify it),
+and each status entity says what it is. The fight now runs them: <b>stat buffs and debuffs</b> from
+<code>FightStatusPropComponent</code>, scaled by the caster's rank like everything else; <b>per-hit falloff</b>
+(Divine Wrath's sixteen hits stamp a 40% decay on the target, so the cast is worth about 2.5 hits, not 16);
+<b>Stun</b> and <b>Frozen</b> (the holder loses its action, and Stun also freezes cooldowns via
+<code>FightStatusSkillStopCdComponent</code>); <b>Blind</b> (the holder's next Attack skill deals nothing, then it
+clears); <b>shields</b> that absorb before HP; <b>poison</b> and other round-start ticks; and expiry triggers, which
+is how Icebound heals when it ends. Durations count the <i>holder's</i> own turns. Landing rolls use
+<code>EffectRate()</code>: base chance x (1 + Effect Hit Rate / base) / (1 + Effect RES / base), cubed-ratio penalty
+for hard controls against a higher-ranked target, and Damp raising the odds of Frozen.</p>
+<p><b>Charms with procs</b> now fire: on-hit skills, each-turn skills, when-hit skills (reflect), and the
+turn-with-no-Technique check that Frost Guard uses. Fear, Confusion, Ridicule and Restrict are applied and shown but
+change nothing here &mdash; taunts and movement have no meaning in a 1v1 without a grid.</p>
 <p><b>Modelled, not extracted:</b> which skill to cast. The prefab lists the AI's tie-break priorities, but the
 choice itself runs in an ECS behaviour tree that is not in the config, so each side casts the first ready
 Technique in slot order. There is no grid, so range, area and positioning do nothing.</p>

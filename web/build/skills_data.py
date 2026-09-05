@@ -648,7 +648,13 @@ def main():
                              "tier": t["tier"], "ele": m.group(1) if m else "Physical",
                              "hits": max(1, min(hits, 20)), "r": per,
                              "kind": sk["type"], "props": charm_props(sk)})
-    (OUT / "_duel.json").write_text(json.dumps({"skills": duel, "lpidOf": lpid_of},
+    # the EC prefabs: hits, on-hit statuses, cooldown flags, charm triggers
+    import sys as _sys, ec_data
+    _duel = {"skills": duel, "lpidOf": lpid_of}
+    ec_data.enrich(_duel, _sys.modules[__name__])
+    print(f"  ec: {sum(1 for x in duel if x.get(chr(101)+chr(99)))} skills with prefab data, "
+          f"{len(_duel[chr(115)+chr(116)+chr(97)+chr(116)+chr(117)+chr(115)+chr(101)+chr(115)])} statuses, {len(_duel[chr(116)+chr(114)+chr(105)+chr(103)])} trigger skills")
+    (OUT / "_duel.json").write_text(json.dumps(_duel,
                                                ensure_ascii=False, separators=(",", ":")),
                                     encoding="utf-8")
     print(f"  duel dataset: {len(duel)} techniques")

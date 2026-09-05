@@ -1,0 +1,324 @@
+"""Enrich the duel dataset from the decoded EC prefabs (out/ec_decoded/*.json).
+
+What the prefab tree looks like, and what we take from each layer:
+
+  skill entity ── FightSkillComponent ── HitList[] ──► hit entity
+       │            ElementType, SkillType, TargetType,        │  FightHitFixedComponent / FightHitRandomTargetComponent
+       │            ResetCDAtStart, LimitedTimes, Ai           │    DamageProp, FixedDamageProp, nested HitList (random targets)
+       │                                                        └─ DamageId ──► damage entity
+       │                                                                          FightDamageComponent.StatusList[]
+       │                                                                            {StatusId, BasePercent, AffectedByProp}
+       └── (Charms) PassiveStatusIdList ──► passive status entity
+                       FightStatus{HitSkill,RoundStart,DamageSkill,RoundCheckSkill}Component.TriggerSkillCfgs[]
+
+  status entity ── ActionComponent.ActionType (Stun, Frozen, Blinding, Poisoned, Shield, Status ...)
+                ── FightStatusComponent (DurationRound, RoundTarget, RoundUpdateTiming, StatusType, stacking)
+                ── FightStatusPropComponent           -> stat props from entity_prop_status, rank/level scaled
+                ── FightStatusDamageFalloffComponent  -> per-hit decay for the source skill
+                ── FightStatusShieldPersistentComponent
+                ── FightStatusRoundStartComponent     -> trigger skills each round (DoT, regen)
+                ── StatusEndComponent                 -> trigger skills on expiry
+                ── FightStatusSkillStopCdComponent    -> cooldowns frozen while it lasts
+                ── FightStatusHitDmgAddPerComponent   -> DurationSkillCount: lasts N of the holder's skills
+
+"Applicator" in these prefabs is the entity the status sits on; "Creator" is whoever put it there.
+"""
+from __future__ import annotations
+import glob, json, re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+_ENTS = None
+
+
+def ents():
+    global _ENTS
+    if _ENTS is None:
+        _ENTS = {}
+        for f in glob.glob(str(ROOT / "out" / "ec_decoded" / "*.json")):
+            for e in json.load(open(f, encoding="utf-8")):
+                _ENTS[e["id"]] = e
+    return _ENTS
+
+
+def comp(eid, name):
+    e = ents().get(eid)
+    if not e:
+        return None
+    for c in e["components"]:
+        if c["type"] == name:
+            return c.get("info") or {}
+    return None
+
+
+def comps(eid):
+    e = ents().get(eid)
+    return {c["type"]: (c.get("info") or {}) for c in e["components"]} if e else {}
+
+
+def _trigger_cfgs(cfgs):
+    out = []
+    for t in cfgs or []:
+        if not t or not t.get("SkillId"):
+            continue
+        out.append({"skill": t["SkillId"], "chance": t.get("BasePercent", 1.0),
+                    "byProp": bool(t.get("AffectedByProp")), "target": t.get("Target"),
+                    "source": t.get("Source")})
+    return out
+
+
+# ---------------------------------------------------------------- hits
+def walk_hits(hitlist, out, depth=0):
+    """Flatten a skill's hit tree into one entry per landed hit, in order."""
+    if depth > 4:
+        return
+    for h in hitlist or []:
+        hid = h.get("ClassId")
+        cs = comps(hid)
+        hitc = None
+        for name, info in cs.items():
+            if name.startswith("FightHit"):
+                hitc = (name, info)
+                break
+        if not hitc:
+            continue
+        name, info = hitc
+        if info.get("HitList"):                       # random-target fan-out: the sub-hits are the hits
+            walk_hits(info["HitList"], out, depth + 1)
+            continue
+        dmg = comp(info.get("DamageId"), "FightDamageComponent") or {}
+        on = [{"status": s["StatusId"], "chance": s.get("BasePercent", 1.0),
+               "byProp": bool(s.get("AffectedByProp")), "target": s.get("TargetType")}
+              for s in (dmg.get("StatusList") or []) if s.get("StatusId")]
+        out.append({"prop": info.get("DamageProp"), "fixed": info.get("FixedDamageProp"),
+                    "type": info.get("DamageType"), "kind": name.replace("Fight", "").replace("Component", ""),
+                    "scope": len(info.get("Scope") or []), "on": on,
+                    "true": bool(info.get("IsTrueDamage")), "ignoreShield": bool(info.get("DamageIgnoreShield"))})
+
+
+def skill_ec(ec_entity_id):
+    fsc = comp(ec_entity_id, "FightSkillComponent")
+    if fsc is None:
+        return None
+    hits = []
+    walk_hits(fsc.get("HitList"), hits)
+    ai = (fsc.get("Ai") or {}).get("AiPriorityTypes") or []
+    return {"ele": fsc.get("ElementType") or "None", "skillType": fsc.get("SkillType"),
+            "target": fsc.get("TargetType"), "hits": hits,
+            "resetCdAtStart": bool(fsc.get("ResetCDAtStart")),
+            "limitedTimes": fsc.get("LimitedTimes", -1), "aiPriority": ai,
+            "needCondition": bool(fsc.get("NeedConditionStatusMeetToRelease"))}
+
+
+# ---------------------------------------------------------------- statuses
+ACTION_SKIP = {"Stun", "Frozen"}                 # the holder loses its action
+ACTION_FLAG = {"Blinding", "Poisoned", "Restrict", "Fear", "Confusion", "Ridicule", "Damp",
+               "Immobilize", "SlowAction", "Chill", "Burn", "SuperArmor", "Invincible"}
+
+
+def status_summary(sid, SD, rank_rows):
+    """Everything the simulator needs to know about one status entity."""
+    cs = comps(sid)
+    fs = cs.get("FightStatusComponent")
+    if fs is None:
+        return None
+    act = (cs.get("ActionComponent") or {}).get("ActionType") or "Status"
+    s = {"id": sid, "action": act,
+         "dur": fs.get("DurationRound", -1), "holder": fs.get("RoundTarget"),
+         "timing": fs.get("RoundUpdateTiming"), "type": fs.get("StatusType"),
+         "stack": bool(fs.get("IsOpenStack")), "maxStack": fs.get("MaxStackedCount", 0)}
+    fo = cs.get("FightStatusDamageFalloffComponent")
+    if fo:
+        s["falloff"] = {"pct": (fo.get("FalloffPercent") or 0) / 10000.0,
+                        "start": fo.get("NumOfStart", 1), "max": fo.get("MaxFalloffCount", -1)}
+    if "FightStatusShieldPersistentComponent" in cs:
+        s["shield"] = True
+    if "FightStatusSkillStopCdComponent" in cs:
+        s["cdFreeze"] = True
+    hd = cs.get("FightStatusHitDmgAddPerComponent")
+    if hd:
+        s["skillCount"] = hd.get("DurationSkillCount", -1)
+        s["onlyAttack"] = hd.get("OnlySkillType") == "Attack"
+    rs = cs.get("FightStatusRoundStartComponent")
+    if rs:
+        s["roundStart"] = _trigger_cfgs(rs.get("StatusTriggerSkillCfgs"))
+    se = cs.get("StatusEndComponent")
+    if se:
+        s["onEnd"] = _trigger_cfgs(se.get("StatusTriggerSkillCfgs"))
+    ar = cs.get("FightStatusAgentRateComponent")
+    if ar:
+        s["boosts"] = {"actions": ar.get("LimitActionTypes") or [], "prop": ar.get("AddPropType")}
+    # Rapid Cast's marker: a one-shot status whose only behaviour is a global-round
+    # hook. The prefab fixes the timing (battle start, self); the amount — one
+    # turn off every Technique — is the skill's own text, since the hook's effect
+    # lives in code rather than in a prop.
+    if "FightStatusGlobalRoundUpdateComponent" in cs and not cs.get("FightStatusPropComponent"):
+        pass
+    if "FightStatusGlobalRoundUpdateComponent" in cs:
+        s["cdStart"] = -1
+    # whatever numbers the status carries — stat changes, shield size, block value —
+    # sit on its entity_prop_status row, scaled by the caster's rank and level
+    rows = rank_rows(sid)
+    if rows:
+        s["props"] = rows                        # {rank: {prop: {v|m,g,k,pct}}}
+    return s
+
+
+# ---------------------------------------------------------------- charms
+PASSIVE_KINDS = {"FightStatusHitSkillComponent": "hit",
+                 "FightStatusRoundStartComponent": "roundStart",
+                 "FightStatusDamageSkillComponent": "damaged",
+                 "FightStatusRoundCheckSkillComponent": "roundCheck",
+                 "FightStatusSkillStartComponent": "skillStart"}
+
+
+def charm_passive(status_ids):
+    out = []
+    for pid in status_ids:
+        cs = comps(pid)
+        for cname, kind in PASSIVE_KINDS.items():
+            info = cs.get(cname)
+            if not info:
+                continue
+            trig = _trigger_cfgs(info.get("TriggerSkillCfgs") or info.get("SkillCfgs") or info.get("StatusTriggerSkillCfgs"))
+            if not trig:
+                continue
+            out.append({"kind": kind, "status": pid, "rate": info.get("Rate", 1.0),
+                        "maxCount": info.get("MaxCount", info.get("MaxInvokeCount", -1)),
+                        "onlyAttack": info.get("OnlySkillType") == "Attack", "triggers": trig})
+    return out
+
+
+# ---------------------------------------------------------------- driver
+def enrich(duel, SD):
+    """Mutates the duel dict: per-skill ec / passive, plus statuses and trigger skills."""
+    skills_cfg = SD.skills                       # ClassId -> skill row
+    prop_float = SD.prop_float
+
+    def ranks_of(rank_prop_id):
+        return sorted(l for l in SD._lp_levels.get(rank_prop_id, []) if l in SD.rank_quality)
+
+    def status_rows(sid):
+        """entity_prop_status row -> per-rank stat rows, same maths as the skills page."""
+        row = SD.status_ent.get(sid)
+        if not row:
+            return {}
+        try:
+            srank = int(row.get("RankPropId") or 0); sgroup = int(row.get("GroupLevelPropId") or 0)
+        except Exception:
+            return {}
+        rks = ranks_of(srank)
+        curve_keys = SD._curve_props(sgroup)
+        out = {}
+        for rk in rks:
+            d = {}
+            for k, v in row.items():
+                if k in SD.SKIP or not str(v).strip() or str(v).strip() == "0":
+                    continue
+                try:
+                    fac = int(v)
+                except Exception:
+                    continue
+                mult = SD.levelprop.get((srank, rk), {}).get(k, 10000) / 10000.0
+                is_pct = prop_float.get(k, True)
+                if k in curve_keys:
+                    d[k] = {"m": mult * (fac / 10000.0) * (0.01 if is_pct else 1), "g": sgroup, "k": k, "pct": is_pct}
+                else:
+                    d[k] = {"v": SD._trunc(fac, SD.levelprop.get((srank, rk), {}).get(k, 10000), is_pct), "pct": is_pct}
+            if d:
+                out[str(rk)] = d
+        return out
+
+    def skill_rows(eid):
+        """A trigger skill's per-rank numbers, the way a Technique's are built."""
+        e = SD.eps.get(eid)
+        if not e:
+            return {}
+        try:
+            rankprop = int(e.get("RankPropId") or 0); group = int(e.get("GroupLevelPropId") or 0)
+        except Exception:
+            return {}
+        rks = ranks_of(rankprop)
+        curve_keys = SD._curve_props(group)
+        out = {}
+        for rk in rks:
+            d = {}
+            for key, _label in SD.STATS:
+                v = (e.get(key) or "").strip()
+                if not v or v == "0":
+                    continue
+                fac = int(v)
+                mult = SD.levelprop.get((rankprop, rk), {}).get(key, 10000)
+                if key in curve_keys:
+                    d["fx" if key == "SkillFixedAttack1" else key] = (mult / 10000.0) * (fac / 10000.0)
+                    if key == "SkillFixedAttack1":
+                        d["fg"] = group
+                    else:
+                        d[key + "_g"] = group
+                else:
+                    d[key] = SD._trunc(fac, mult, key in SD.PCT)
+            if d:
+                out[str(rk)] = d
+        return out
+
+    statuses, trig = {}, {}
+    pending_status, pending_skill = set(), set()
+
+    def note_hits(hits):
+        for h in hits:
+            for o in h.get("on", []):
+                pending_status.add(o["status"])
+
+    for s in duel["skills"]:
+        row = skills_cfg.get(s["id"])
+        if not row:
+            continue
+        try:
+            eid = int(row.get("EcEntityId") or 0)
+        except Exception:
+            eid = 0
+        ec = skill_ec(eid) if eid else None
+        if ec:
+            s["ec"] = ec
+            if ec["ele"] not in ("None", None):
+                s["ele"] = ec["ele"]
+            elif ec["hits"]:
+                s["ele"] = "Physical"
+            note_hits(ec["hits"])
+        if s["kind"] == "Charm":
+            ids = [int(x) for x in re.findall(r"\d+", row.get("PassiveStatusIdList") or "")]
+            pas = charm_passive(ids)
+            if pas:
+                s["passive"] = pas
+                for p in pas:
+                    for t in p["triggers"]:
+                        pending_skill.add(t["skill"])
+
+    # trigger skills can apply statuses, whose triggers can fire skills: close over both
+    seen_skill = set()
+    for _ in range(4):
+        for sk in list(pending_skill - seen_skill):
+            seen_skill.add(sk)
+            skrow = skills_cfg.get(sk)
+            eid = int(skrow["EcEntityId"]) if skrow and skrow.get("EcEntityId") else sk
+            ec = skill_ec(eid)
+            entry = {"id": sk, "name": (SD.L(f"item_{sk}_name") if skrow else None) or f"skill {sk}",
+                     "r": skill_rows(eid), "ec": ec}
+            if ec:
+                note_hits(ec["hits"])
+            trig[str(sk)] = entry
+        for sid in list(pending_status - set(int(k) for k in statuses)):
+            summ = status_summary(sid, SD, status_rows)
+            if summ:
+                statuses[str(sid)] = summ
+                for key in ("roundStart", "onEnd"):
+                    for t in summ.get(key, []):
+                        pending_skill.add(t["skill"])
+            else:
+                statuses[str(sid)] = {"id": sid, "action": "Unknown", "dur": -1}
+        if not (pending_skill - seen_skill) and not (pending_status - set(int(k) for k in statuses)):
+            break
+
+    duel["statuses"] = statuses
+    duel["trig"] = trig
+    return duel
