@@ -611,6 +611,7 @@ def main():
                 out[str(rk)] = row
         return out
 
+    from richtext import richtext as _rt
     # ---- compact dataset for the duel simulator -------------------------------
     # element is not in any CSV (it lives in the binary EC prefabs), but the
     # client's own description names it inside a colour tag; no element means
@@ -650,6 +651,7 @@ def main():
                 except Exception:
                     _pvp = 10000
                 duel.append({"id": sk["id"], "name": sk["name"], "cls": c["name"], "pvp": _pvp,
+                             "desc": _rt((sk.get("desc") or "").strip(), sk.get("links")),
                              "tier": t["tier"], "ele": m.group(1) if m else "Physical",
                              "hits": max(1, min(hits, 20)), "r": per,
                              "kind": sk["type"], "props": charm_props(sk)})

@@ -524,7 +524,6 @@ table.log{font-size:13px} table.log td{padding:6px 12px}
 .slot.q-legendary .starbadge{background:var(--q-legendary)} .slot.q-mythic .starbadge{background:var(--q-mythic)}
 .slot.q-divine .starbadge{background:var(--q-divine)} .slot.q-immortal .starbadge{background:var(--q-immortal)}
 .fighter .slot.charm{border-color:var(--blue-rail)}
-.fighter .slot.charm.filled img{filter:saturate(.85)}
 .fighter .slot .cdov{position:absolute;inset:0;border-radius:50%;background:rgba(20,18,16,.62);color:#fff;
   display:flex;align-items:center;justify-content:center;font:800 20px var(--mono);
   text-shadow:0 1px 2px rgba(0,0,0,.6)}
@@ -634,3 +633,27 @@ select.fclass:disabled{opacity:.7;cursor:default}
 @media (prefers-reduced-motion:reduce){
   .medallion,.ribbon,.arena{animation:none!important}
 }
+
+/* ---------- duel: log beside the arena, hover cards ---------- */
+.arena-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;align-items:start}
+@media (max-width:1000px){ .arena-grid{grid-template-columns:1fr} }
+.sidelog h3{margin:0 0 8px;font-size:1.02rem}
+.sidelog .combatlog{max-height:640px;min-height:220px}
+.combatlog li.empty{color:var(--faint);font-size:12.5px}
+.combatlog li.turn.cont{border-top:0;padding-top:6px}
+.fighter .slot.filled img{filter:none}
+.fighter .slot.cooling img{filter:grayscale(.75) brightness(.72)}
+.skilltip{position:fixed;z-index:80;width:330px;max-width:calc(100vw - 24px);padding:12px 14px 10px;
+  border-radius:11px;background:var(--surface);border:1px solid var(--line);box-shadow:0 14px 38px rgba(0,0,0,.28);
+  font-size:13px;line-height:1.45;pointer-events:none}
+.skilltip .tt-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.skilltip .tt-head img{width:40px;height:40px;border-radius:50%}
+.skilltip .tt-head b{font-size:15px;display:block}
+.skilltip .tt-meta{font:500 11px var(--body);letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.skilltip .tt-rows{display:grid;grid-template-columns:1fr auto;gap:2px 12px;margin:6px 0 8px;padding:6px 0;
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:12.5px}
+.skilltip .tt-rows dt{color:var(--muted)} .skilltip .tt-rows dd{margin:0;font:600 12.5px var(--mono);text-align:right}
+.skilltip .tt-desc{color:var(--muted);font-size:12.5px}
+.skilltip .tt-desc .kw{color:var(--gold);border-bottom:1px dotted currentColor}
+.skilltip .tt-desc .dnum{font-family:var(--mono);font-weight:600;color:var(--ink)}
+.skilltip .tt-st{margin-top:6px;font-size:12px;color:#8a5a86}
