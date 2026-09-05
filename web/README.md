@@ -21,7 +21,8 @@ web/
       skills/     328 skill icons
       skills.js   client-side rank stepper + skill-level / character-rank controls
       calc.js     stat calculator: differentiates the damage formula, draws its own charts
-      duel.js     duel simulator: turn clock, cooldowns, Monte Carlo
+      duel.js     duel simulator: turn clock, cooldowns, Monte Carlo, and the
+                  battle-scene playback (order strip, HP bars, cooldown veils, floats)
       duel.json   162 Techniques with element, hit count and per-rank coefficients
       curves.json growth curves, fetched (too big to inline)
     index.html  method.html  top-up-ladder.html  combat/*.html
