@@ -687,3 +687,16 @@ select.fclass:disabled{opacity:.7;cursor:default}
   .playbar .mirror{font-size:12.5px}
   .duelstats{grid-template-columns:1fr}
 }
+
+/* ---------- equipment reference ---------- */
+.threecol{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin:12px 0 4px}
+.threecol .tablewrap{margin:0}
+ul.plain{padding-left:18px;margin:8px 0 18px} ul.plain li{margin:3px 0}
+table.equip td{vertical-align:top;font-size:13.5px} table.equip td .hint{font-size:11.5px}
+.q-white{color:var(--muted)} .q-blue{color:var(--q-rare);font-weight:600} .q-purple{color:var(--q-epic);font-weight:600}
+.q-orange{color:var(--q-legendary);font-weight:600} .q-gold{color:var(--q-mythic);font-weight:600}
+.q-red{color:var(--q-divine);font-weight:600} .q-rainbow{color:var(--q-immortal);font-weight:600}
+.suits{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.suit{padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.suit h3{margin:0 0 6px;font-size:1rem} .suit ul{margin:0;padding-left:18px;font-size:13.5px} .suit li{margin:4px 0}
+.calc .verdict{font-size:15px;margin:14px 0 8px} .calc .note{color:var(--muted);font-size:13.5px}

@@ -9,6 +9,8 @@ from build import (layout, write, load_tiers, base_tables, L, csvrows,
 import skills_page
 import calc_page
 import duel_page
+import speed_page
+import equip_page
 import charts
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -120,98 +122,9 @@ for how much the level gap matters. If elemental scaling ever shifts without a s
 
 # ------------------------------------------------------------------ speed
 def page_speed():
-    # only the RATIO of two SPDs matters, so plot that — absolute SPD runs into
-    # the hundreds of thousands and an absolute axis would be misleading.
-    spd = charts.line_chart(
-        [{"name": "turns you take per turn of theirs", "colour": "#3d6ea8",
-          "points": [(r / 20.0, (r / 20.0) ** 0.5) for r in range(20, 321)]},
-         {"name": "what people expect (linear)", "colour": "#9a938a", "dash": True,
-          "points": [(r / 20.0, r / 20.0) for r in range(20, 81)]}],
-        ylabel="your turns per their turn", xlabel="your SPD divided by theirs",
-        ymax=4.2, xticks=[1, 2, 4, 6, 9, 12, 16],
-        yfmt=lambda v: f"{v:.1f}x", xfmt=lambda v: f"{v:.0f}x",
-        marks=[{"x": 4, "label": "2x turns"}, {"x": 9, "label": "3x turns"}],
-        caption="Scale-free on purpose: 200 against 100 and 400,000 against 200,000 are the same "
-                "fight. Only the ratio counts, so raw SPD numbers never saturate or cap.")
-    spd = charts.line_chart(
-        [{"name": "turns taken, against a 100-SPD unit", "colour": "#3d6ea8",
-          "points": [(x, (x / 100.0) ** 0.5) for x in range(100, 10001, 100)]},
-         {"name": "if SPD were linear", "colour": "#9a938a", "dash": True,
-          "points": [(x, x / 100.0) for x in range(100, 1101, 100)]}],
-        ylabel="relative turns", xlabel="SPD", ymax=10.5,
-        yfmt=lambda v: f"{v:.0f}x", xfmt=lambda v: f"{v/1000:.0f}K" if v >= 1000 else f"{v:.0f}",
-        marks=[{"x": 400, "label": "2x"}, {"x": 1600, "label": "4x"}],
-        caption="Doubling your turn rate costs four times the SPD; tripling it costs nine times.")
-    body = f"""
-<div class="wrap">
-<p class="eyebrow">Combat mechanics</p>
-<h1>SPD and turn order</h1>
-<p class="lede">Speed is not initiative. The battle runs on a timeline, and SPD buys how often you act &mdash;
-on a square root, so it gets expensive fast.</p>
-
-<h2>The battle is a timeline</h2>
-<p>Every unit sits in a queue ordered by the moment it will next act. The engine takes whoever is earliest,
-lets them act, then re-inserts them at <code>now + their interval</code>. A faster unit's clock advances in
-smaller steps, so it keeps returning to the front.</p>
-<pre><code>interval = 100000 / sqrt(SPD x rankSpeedScale)</code></pre>
-<p>A smaller interval means acting sooner and more often. SPD is floored at 1.</p>
-
-<h2>The consequence</h2>
-<p>Because SPD sits under a square root, relative turn frequency is:</p>
-<pre><code>your actions / their actions = sqrt(your SPD / their SPD)</code></pre>
-<p><b>To act twice as often you need four times the SPD.</b></p>
-{spd}
-
-<div class="tablewrap"><table>
-<thead><tr><th class="num">SPD</th><th class="num">Interval</th><th>Turns vs a 100-SPD unit</th></tr></thead>
-<tbody>
-<tr><td class="num">100</td><td class="num">10,000</td><td>1&times;</td></tr>
-<tr><td class="num">400</td><td class="num">5,000</td><td>2&times;</td></tr>
-<tr><td class="num">900</td><td class="num">3,333</td><td>3&times;</td></tr>
-<tr><td class="num">1,600</td><td class="num">2,500</td><td>4&times;</td></tr>
-<tr><td class="num">10,000</td><td class="num">1,000</td><td>10&times;</td></tr>
-</tbody></table></div>
-
-<h2>What extra turns cost</h2>
-<p>Starting from 65,200 SPD, a realistic late-Expert value:</p>
-<div class="tablewrap"><table>
-<thead><tr><th>Gain</th><th class="num">SPD needed</th><th class="num">Increase</th></tr></thead>
-<tbody>
-<tr><td>+10% actions</td><td class="num">78,892</td><td class="num">+21%</td></tr>
-<tr><td>+20% actions</td><td class="num">93,888</td><td class="num">+44%</td></tr>
-<tr><td>+50% actions</td><td class="num">146,700</td><td class="num">+125%</td></tr>
-<tr><td>+100% actions</td><td class="num">260,800</td><td class="num">+300%</td></tr>
-</tbody></table></div>
-
-<h2>The rank multiplier</h2>
-<p><code>rankSpeedScale</code> sits <i>inside</i> the square root, which makes it a large lever. It is constant
-within a rank, so it cancels out in same-rank fights and only matters across ranks.</p>
-<div class="tablewrap"><table>
-<thead><tr><th>Rank band</th><th class="num">Scale</th><th class="num">Effect on turn rate</th></tr></thead>
-<tbody>
-<tr><td>No Rank &rarr; Master</td><td class="num">1</td><td class="num">baseline</td></tr>
-<tr><td>Paragon</td><td class="num">10</td><td class="num">&times;3.16</td></tr>
-<tr><td>Saint and above</td><td class="num">150</td><td class="num">&times;12.25</td></tr>
-</tbody></table><caption>Source: <code>fight_rank_offset_damage</code>, <code>SpeedScale</code> column.</caption></div>
-
-<h2>Two things that ignore SPD entirely</h2>
-<p>Status effects can move a unit's next action time directly, bypassing the stat: a positive
-<code>RoundIntervalPercent</code> advances the turn, a negative one delays it, and <b>zero makes the unit act
-immediately</b>. Skill cooldowns are a separate flat system that SPD does not reduce.</p>
-
-<div class="note">
-<p><b>On the community formula.</b> A widely shared version writes each unit's share of total actions as
-<code>2R &times; sqrt(s) / sum(sqrt(s))</code> across both teams. That is correct &mdash; it is the fight-level
-integral of the same rule, and the ratio it produces, <code>sqrt(s/e)</code>, matches the code exactly.
-Two caveats: it omits <code>rankSpeedScale</code> (harmless within one rank), and the "2R action pool" is a
-modelling convenience rather than something the code computes.</p>
-</div>
-</div>
-"""
-    return layout("SPD and turn order", "Sword x Staff runs an active-time battle; SPD buys turn frequency on a square root. The formula, the real costs, and the rank multiplier.", body, "combat", 1)
+    return speed_page.render(layout, base_tables, charts)
 
 
-# ------------------------------------------------------------------ crit
 def page_crit(ladder):
     rows, prev = [], None
     for e in ladder:
@@ -418,6 +331,7 @@ def main():
     n += write("index.html", page_home())
     n += write("method.html", page_method())
     n += write("top-up-ladder.html", page_topup(tiers, iconmap))
+    n += write("equipment.html", equip_page.render(layout, base_tables))
     n += write("combat/index.html", page_combat_index())
     n += write("combat/damage.html", page_damage())
     n += write("combat/elemental.html", page_elemental(ladder))
