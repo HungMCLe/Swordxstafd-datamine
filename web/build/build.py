@@ -48,6 +48,7 @@ NAV = [
     ("Home",            "index.html",              "home"),
     ("Combat mechanics","combat/index.html",       "combat"),
     ("Skills",          "combat/skills.html",      "skills"),
+    ("Equipment",       "equipment.html",          "equipment"),
     ("Top-up ladder",   "top-up-ladder.html",      "topup"),
     ("Method",          "method.html",             "method"),
 ]
