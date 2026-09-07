@@ -101,6 +101,7 @@ def layout(title, desc, body, active, depth=0):
 <header class="masthead"><div class="masthead-in">
   <a class="brand" href="{up}index.html"><span class="paw">&#128062;</span>{SITE}<small>{TAGLINE}</small></a>
   <nav class="top">{nav}</nav>
+  <details class="mnav"><summary aria-label="Menu"><span class="bars" aria-hidden="true"></span>Menu</summary><nav class="mobile">{nav}</nav></details>
 </div></header>
 {body}
 <footer class="site"><div class="in">
