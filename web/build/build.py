@@ -52,6 +52,7 @@ NAV = [
     ("NPCs",            "npcs.html",               "npcs"),
     ("Pets",            "pets.html",               "pets"),
     ("Arena",           "arena.html",              "arena"),
+    ("XP",              "xp.html",                 "xp"),
     ("Top-up ladder",   "top-up-ladder.html",      "topup"),
     ("Method",          "method.html",             "method"),
 ]
