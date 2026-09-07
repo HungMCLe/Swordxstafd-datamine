@@ -133,7 +133,7 @@ def render(layout, base_tables):
         for k in shown:
             step = table[k] - table.get(k - 1, 0)
             bless_total += step
-            bless_rows += (f"<tr><td class='num'>{top_cap + k} <span class='hint'>bless {k}</span></td><td class='num'>{n(step)}</td>"
+            bless_rows += (f"<tr><td class='num'>{top_cap + k} <span class='hint'>Season Level {k}</span></td><td class='num'>{n(step)}</td>"
                            f"<td class='num'>{n(table[k])}</td><td class='num'>{n(score[fam].get(k, 0))}</td></tr>")
         extra = len(table) - len(shown) if table else 0
         block = f'<h2 id="s-{fam.lower()}">{title}</h2>'
@@ -142,15 +142,15 @@ def render(layout, base_tables):
                   f"<div class='tablewrap'><table class='xp'><thead><tr><th class='num'>Level</th><th class='num'>XP for this level</th><th class='num'>XP from level 0</th></tr></thead>"
                   f"<tbody>{normal_rows}</tbody></table></div></details>")
         if shown:
-            block += (f"<details open><summary>Season levels {top_cap + 1}–{top_cap + bcap} &mdash; bless ladder of {html.escape(fam_name)}, "
-                      f"<b>{n(bless_total)}</b> bless XP to max it</summary>"
-                      f"<p class='hint'>Opens once you are {html.escape(disp.get(top_internal, top_internal))} at level {top_cap}. Bless XP is its own pool; "
-                      f"the level shown is {top_cap} plus the bless level. Each bless level also adds season score."
-                      + (f" The table continues to bless {max(table)}, past this promotion's limit of {bcap}." if extra > 0 else "") + "</p>"
-                      f"<div class='tablewrap'><table class='xp'><thead><tr><th class='num'>Shown level</th><th class='num'>Bless XP for this level</th><th class='num'>Bless XP total</th><th class='num'>Season score</th></tr></thead>"
+            block += (f"<details open><summary>Season Levels {top_cap + 1}–{top_cap + bcap} &mdash; the season ladder of {html.escape(fam_name)}, "
+                      f"<b>{n(bless_total)}</b> Season XP to max it</summary>"
+                      f"<p class='hint'>Opens once you are {html.escape(disp.get(top_internal, top_internal))} at level {top_cap}. Season XP is its own pool; "
+                      f"the level shown is {top_cap} plus the Season Level, and it expires with the season. Each Season Level also adds season score."
+                      + (f" The table continues to Season Level {max(table)}, past this promotion's limit of {bcap}." if extra > 0 else "") + "</p>"
+                      f"<div class='tablewrap'><table class='xp'><thead><tr><th class='num'>Shown level</th><th class='num'>Season XP for this level</th><th class='num'>Season XP total</th><th class='num'>Season score</th></tr></thead>"
                       f"<tbody>{bless_rows}</tbody></table></div></details>")
         elif season:
-            block += f"<p class='hint'>No bless ladder is configured for {html.escape(fam_name)} yet.</p>"
+            block += f"<p class='hint'>No Season Level ladder is configured for {html.escape(fam_name)} yet.</p>"
         sections.append(block)
         summary.append((title, top_cap, cum.get(top_cap, 0), fam_total, bcap, bless_total))
 
@@ -168,19 +168,21 @@ def render(layout, base_tables):
 <p class="eyebrow">Reference</p>
 <h1>XP requirements</h1>
 <p class="lede">Every level's cost on both ladders. Normal levels run on the player XP column up to each promotion's
-cap; past the cap, a season's <i>bless</i> ladder takes over with its own XP pool, and the level you see is the cap
-plus your bless level. Promote in the next season and the numbers you already passed become ordinary levels again.</p>
+cap; past the cap, <b>Season Levels</b> take over with their own XP pool, and the level you see is the cap plus your
+Season Level. Promote in the next season and the numbers you already passed become ordinary levels again.</p>
 
 <h2>How the game counts it</h2>
-<p><code>Player.Level = BaseLevel + bless level</code>. A level above your promotion's base cap is a <b>season
-level</b> (<code>IsSeasonLevel</code>: <code>level &gt; base cap</code>). The bless ladder opens only when you hold
-the top sub-rank of the season's promotion and stand at its cap; it runs to the bless limit in
-<code>system_level_limit</code> for that promotion. Normal XP is <code>level_exp</code> column 1, stored as the total
-from level 0; bless XP is <code>level_bless</code>, stored as the total per promotion family. The per-level numbers
-below are the differences.</p>
+<p>The game's own tooltip puts it as <i>"Level {{0}} + Season Level {{1}}"</i> and <i>"Levels beyond your Rank's cap are
+calculated as Season Levels."</i> When a season ends, <i>"Season Levels will expire and convert to {{CONVERT}}"</i>,
+which <i>"can be used to upgrade your Astral Pact."</i> In the code that is <code>Player.Level = BaseLevel + season
+level</code>, with <code>IsSeasonLevel</code> true whenever <code>level &gt; base cap</code>. The Season Level ladder
+opens only when you hold the top sub-rank of the season's promotion and stand at its cap, and runs to that
+promotion's limit in <code>system_level_limit</code>. Normal XP is <code>level_exp</code> column 1, stored as the
+total from level 0; Season Level XP is <code>level_bless</code> (the config's internal name for the season system is
+"bless"), stored as the total per promotion family. The per-level numbers below are the differences.</p>
 
 <div class="tablewrap"><table><thead><tr><th>Season</th><th class="num">Cap</th><th class="num">XP across the promotion</th>
-<th class="num">XP from level 0</th><th class="num">Season levels</th><th class="num">Bless XP to max</th></tr></thead>
+<th class="num">XP from level 0</th><th class="num">Season Levels</th><th class="num">Season XP to max</th></tr></thead>
 <tbody>{sum_rows}</tbody></table></div>
 
 {"".join(sections)}
@@ -191,5 +193,6 @@ below are the differences.</p>
 <tbody>{pet_rows}</tbody></table></div>
 </div>
 """
+    body = body.replace("{CONVERT}", html.escape(loc("item_61_name", "the season item")))
     return layout("XP requirements", "Every Sword x Staff level's XP cost: the normal ladder to each promotion cap and each "
-                  "season's bless ladder past it.", body, "xp", 0)
+                  "season's Season Level ladder past it.", body, "xp", 0)
