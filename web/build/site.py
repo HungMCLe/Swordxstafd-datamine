@@ -11,6 +11,9 @@ import calc_page
 import duel_page
 import speed_page
 import equip_page
+import npc_page
+import pet_page
+import arena_page
 import charts
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -332,6 +335,9 @@ def main():
     n += write("method.html", page_method())
     n += write("top-up-ladder.html", page_topup(tiers, iconmap))
     n += write("equipment.html", equip_page.render(layout, base_tables))
+    n += write("npcs.html", npc_page.render(layout, base_tables, DIST, OUT))
+    n += write("pets.html", pet_page.render(layout, DIST, OUT))
+    n += write("arena.html", arena_page.render(layout))
     n += write("combat/index.html", page_combat_index())
     n += write("combat/damage.html", page_damage())
     n += write("combat/elemental.html", page_elemental(ladder))
