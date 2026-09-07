@@ -203,10 +203,12 @@ def render(layout, base_tables):
             plist = [p for p in early if p["level"] == lv]
             parts.append(block(f"Level {lv}", f"{len(plist)} pieces.", plist, lv).replace("<h2", "<h3", 1).replace("</h2>", "</h3>", 1))
         sections.append("\n".join(parts))
+    KINGDOM_MAP = {100: 13, 130: 14, 160: 17, 190: 19, 220: 21}   # gear level -> map id, from the table's source memos
     for cap in season_caps:
         s = season_by_cap[cap]
         plist = [p for p in levelled if p["level"] == cap]
-        sections.append(block(f"Season {s['n']} · {s['name']}",
+        kingdom = loc(f"ui_map_{KINGDOM_MAP.get(cap, 0)}", "")
+        sections.append(block(f"Season {s['n']} · {s['name']}" + (f" — {kingdom}" if kingdom else ""),
                               f"Level {cap} gear, the cap of {html.escape(s['promotion'])} &mdash; the promotion this season's "
                               f"<code>astrological_season_config</code> row names. {len(plist)} pieces.", plist, cap))
 
