@@ -261,9 +261,11 @@ and set bonuses are the game's own text.</p>
 
 <h2>How a piece is valued</h2>
 <p><code>CalcEquipMainProps</code> reads the piece's main stat off its level curve and multiplies it twice: once by the
-upgrade level (the <b>+N</b> you pay materials for) and once by a fixed <b>quality factor</b>. Bless goes on top of that,
-and only counts while your promotion matches the piece's.</p>
-<pre><code>main = curve[level] x (1 + upgrade[+N]) x (1 + quality)   (+ bless[b] while the promotion matches)</code></pre>
+upgrade level (the <b>+N</b> you pay materials for) and once by a fixed <b>quality factor</b>. <b>Season Enhancement</b>
+goes on top of that &mdash; the game's tooltip: <i>"Gear Enhancement Level {0} + Season Level {1}"</i>, <i>"Season
+Enhancement provides gear power boosts beyond your current Rank's cap"</i> &mdash; and only counts while your promotion
+matches the piece's (the config calls it "bless").</p>
+<pre><code>main = curve[level] x (1 + upgrade[+N]) x (1 + quality)   (+ season enhancement[b] while the promotion matches)</code></pre>
 <p>The secondary stat uses the same shape on its own curve. The piece's level is your level clamped to the piece's own
 level (<code>EquipInfo.GetLevel</code>); every piece here has no level extension, so a levelled piece is fixed at its
 level and a drop that scales takes the level it fell at.</p>
@@ -272,8 +274,8 @@ level and a drop that scales takes the level it fell at.</p>
 <caption>From <code>level_prop_equip_rank</code>; constant across levels.</caption></div>
 <div class="tablewrap"><table><thead><tr><th class="num">Upgrade</th><th class="num">Factor</th></tr></thead><tbody>{upg_rows}</tbody></table>
 <caption>From <code>level_prop_equip_upgrade</code>. The material table runs to +250.</caption></div>
-<div class="tablewrap"><table><thead><tr><th class="num">Bless</th><th class="num">Factor</th></tr></thead><tbody>{bless_rows}</tbody></table>
-<caption>From <code>level_prop_equip_bless_level</code>, the common curve; a few pieces use their own.</caption></div>
+<div class="tablewrap"><table><thead><tr><th class="num">Season Enh.</th><th class="num">Factor</th></tr></thead><tbody>{bless_rows}</tbody></table>
+<caption>Season Enhancement, from <code>level_prop_equip_bless_level</code>, the common curve; a few pieces use their own.</caption></div>
 </div>
 
 <h2>The seasons</h2>
