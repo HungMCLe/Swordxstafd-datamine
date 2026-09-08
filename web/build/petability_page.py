@@ -87,13 +87,19 @@ def render(layout, base_tables, dist, out):
     for r in gr:
         graph[(r[0].strip(), r[1].strip())][_num(r[2])] = [_num(x) for x in re.findall(r"-?\d+", r[3])]
 
-    pets_by_tree = collections.defaultdict(list); ptype = {}
+    it = _b.csvrows("item"); ih = [c.strip() for c in it[0]]; ii = {c: i for i, c in enumerate(ih)}
+    items = {r[0].strip(): r for r in it[2:] if r and r[0].strip().isdigit()}
+    pets_by_tree = collections.defaultdict(list); ptype = {}; tquality = {}
     for p in pets:
-        name = loc(f"item_{p[0].strip()}_name", "")
+        cid = p[0].strip()
+        name = loc(f"item_{cid}_name", "")
         if not name or name.startswith("DNT"):
             continue
-        pets_by_tree[p[pi["AbilityId"]].strip()].append(name)
-        ptype[p[pi["AbilityId"]].strip()] = loc(f"PetType.{p[pi['Type']].strip()}", p[pi["Type"]].strip())
+        t = p[pi["AbilityId"]].strip()
+        pets_by_tree[t].append(name)
+        ptype[t] = loc(f"PetType.{p[pi['Type']].strip()}", p[pi["Type"]].strip())
+        if cid in items:
+            tquality.setdefault(t, loc(f"Quality.{items[cid][ii['Quality']].strip()}", items[cid][ii["Quality"]].strip()))
 
     # ---- art
     def copy_dir(sub, dest, prefix=""):
@@ -241,17 +247,25 @@ def render(layout, base_tables, dist, out):
             "eq_txt": " + ".join(mat(i, n) for i, n in eq.items()),
         }
 
-    # ---- trees
+    # ---- trees: one section per role, drawn from the Mythic tree; the others as a proportion
     gens = {"1": ("1", 1), "2": ("2", 1), "3": ("3", 1), "4": ("1", 2), "5": ("2", 2), "6": ("3", 2), "7": ("1", 3), "8": ("2", 3), "9": ("3", 3)}
+
+    def factor_of(tree):
+        r = levels.get((tree, "1"), [])
+        sid = r[0][api["PropScaleFactorId"]].strip() if r else "1"
+        return 1 + scale.get(sid, {}).get("Attack", 0) / 10000.0
+
     sections = []
-    for base in ("1", "2", "3"):
-        typ = ptype.get(base, "")
-        gen_names = {g: ", ".join(pets_by_tree.get(t, [])) for t, (b, g) in gens.items() if b == base}
-        pages = [page(base, pg) for pg in sorted({r[ai["PageCode"]].strip() for r in nodes[base].values()}, key=int)]
+    for role in ("1", "2", "3"):
+        trees_ = [t for t, (b, g) in sorted(gens.items(), key=lambda kv: kv[1][1]) if b == role and t in nodes]
+        released = [t for t in trees_ if pets_by_tree.get(t)]
+        primary = released[-1] if released else trees_[-1]
+        typ = ptype.get(primary, ptype.get(role, ""))
+        f_primary = factor_of(primary)
+        pages = [page(primary, pg) for pg in sorted({r[ai["PageCode"]].strip() for r in nodes[primary].values()}, key=int)]
         grand = collections.Counter(); grand_eq = collections.Counter()
         for p in pages:
             grand.update(p["cost"]); grand_eq.update(p["eq"])
-        fam_base = next(iter(grand_eq))
         rows_html = ""
         for p in pages:
             rows_html += (f"<tr><td><b>Page {p['pg']}</b><br><span class='hint'>{p['n']} nodes{(' · ' + html.escape(p['gate'])) if p['gate'] else ''}</span></td>"
@@ -264,18 +278,22 @@ def render(layout, base_tables, dist, out):
         drawings = "".join(
             f"<figure class='pagefig'><figcaption><b>Page {p['pg']}</b>" + (f" · opens at {html.escape(p['gate'])}" if p['gate'] else "") +
             f"</figcaption>{p['svg']}</figure>" for p in pages)
-        gen_txt = "".join(
-            f"<li><b>Generation {g}</b> ({html.escape(gen_names.get(g, '') or 'none released yet')}): " +
-            (f"the same tree, costs and gates, with every node and so every power figure <b>+{g * 10 - 10}%</b>." if g > 1 else "the numbers below.") + "</li>"
-            for g in (1, 2, 3))
+        others = ""
+        for t in trees_:
+            if t == primary:
+                continue
+            q = tquality.get(t, f"tree {t}"); names = ", ".join(pets_by_tree.get(t, [])) or "none released yet"
+            ratio = factor_of(t) / f_primary
+            others += (f"<li><b>{html.escape(q)}</b> ({html.escape(names)}): the same tree, costs and gates; every stat and power figure is "
+                       f"<b>{ratio * 100:.0f}%</b> of the {html.escape(tquality.get(primary, ''))} numbers.</li>")
         sections.append(f"""
-<h2 id="tree-{base}">{html.escape(typ)} tree <span class="hint">{html.escape(gen_names.get(1, ''))}</span></h2>
-<ul class="plain">{gen_txt}</ul>
+<h2 id="tree-{role}">{html.escape(typ)} tree <span class="hint">{html.escape(tquality.get(primary, ''))} &middot; {html.escape(", ".join(pets_by_tree.get(primary, [])))}</span></h2>
 <p class="costs">All ten pages: {cost_cell(grand, grand_eq)}</p>
 <div class="tablewrap"><table class="pages"><thead><tr><th>Page</th><th>To fill it</th><th class="num">Power</th><th>A full page grants</th></tr></thead>
 <tbody>{rows_html}</tbody></table>
 <caption>Power counts the flat stats by the game's own weights; the second line adds the percent nodes' worth for a Fantomon of that level.
 The crit, accuracy and damage nodes score against your own base stats and are not in the figure.</caption></div>
+<ul class="plain">{others}</ul>
 <details><summary>The pages, drawn</summary><div class="pagefigs">{drawings}</div></details>
 <details><summary>What each level of a node costs, page by page</summary>
 <div class="tablewrap"><table class="pages"><thead><tr><th class="num">Level</th>{"".join(f"<th>Page {p['pg']}</th>" for p in pages)}</tr></thead><tbody>{cost_pattern}</tbody></table>
@@ -287,9 +305,10 @@ The crit, accuracy and damage nodes score against your own base stats and are no
 <div class="wrap">
 <p class="eyebrow">Reference</p>
 <h1>Fantomon ability trees</h1>
-<p class="lede">Three trees, one per Fantomon role. Each has ten pages of nodes drawn the way the game lays them out, and
-every node has ten levels. The table gives, for each page, what it costs to fill, what that is worth in power, and
-what a full page grants. Later generations of Fantomon use the same tree with a bonus on every node.</p>
+<p class="lede">Three trees, one per Fantomon role, shown for the Mythic Fantomon. Each has ten pages of nodes drawn
+the way the game lays them out, and every node has ten levels. The table gives, for each page, what it costs to fill,
+what that is worth in power, and what a full page grants. Epic and Legendary Fantomon use the same tree with smaller
+numbers, stated under each table.</p>
 
 <h2>Materials and power</h2>
 <p>Each role pays in its own family, and within a family four of a tier merge into one of the next
@@ -303,7 +322,8 @@ self-choose material boxes.</p>
 {SCORE['Speed']:g}, HP {SCORE['MaxHp']:g}. A node's percent bonus multiplies the Fantomon's own stat, so its worth depends on the
 Fantomon's level; the table shows the flat part and the total for a Fantomon at level {", ".join(str(l) for l in REF_LEVELS)}.
 Pages open in order and some need a promotion: page 2 at Expert I, 4 at Champion I, 6 at Master I, 8 at Paragon I,
-9 at Saint I.</p>
+9 at Saint I. Every node's stats are scaled by the Fantomon's quality (<code>pet_ability_prop_scale_factor</code>):
+Mythic +20%, Legendary +10%, Epic none.</p>
 {"".join(sections)}
 </div>
 """
