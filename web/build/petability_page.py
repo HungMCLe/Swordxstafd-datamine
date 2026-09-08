@@ -310,6 +310,7 @@ the way the game lays them out, and every node has ten levels. The table gives, 
 what that is worth in power, and what a full page grants. Epic and Legendary Fantomon use the same tree with smaller
 numbers, stated under each table.</p>
 
+<p><b>Deciding where the material goes?</b> <a href="pet-spending.html">Where the material goes</a> has the rate of return per page and slot, the diminishing-returns curves, focus against spread, the optimal order and a calculator for your own stock.</p>
 <h2>Materials and power</h2>
 <p>Each role pays in its own family, and within a family four of a tier merge into one of the next
 (<code>item_merge</code>): {m4}. Wool, Egg and Essence do not convert into each other; the only way across is the
