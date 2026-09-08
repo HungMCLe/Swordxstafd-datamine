@@ -32,7 +32,7 @@ SYS = {"SystemAttackPercent": "Attack", "SystemDefencePercent": "Defence", "Syst
 REF_LEVELS = (100, 150, 200)
 
 
-def render(layout, base_tables, dist, out):
+def render(layout, base_tables, dist, out, charts=None):
     import build as _b
     L = _b.L
     ladder, *_ = base_tables()
@@ -300,6 +300,8 @@ The crit, accuracy and damage nodes score against your own base stats and are no
 <caption>Every node on a page costs the same per level.</caption></div></details>
 """)
 
+    import petspend_page
+    analysis = petspend_page.section(charts) if charts else ""
     m4 = " &middot; ".join(f"4 &times; {mat(m, 1)} &rarr; {mat(p, 1)}" for p, (m, c) in merge.items() if p in ("1541", "1542", "1551", "1552", "1531", "1532"))
     body = f"""
 <div class="wrap">
@@ -310,7 +312,7 @@ the way the game lays them out, and every node has ten levels. The table gives, 
 what that is worth in power, and what a full page grants. Epic and Legendary Fantomon use the same tree with smaller
 numbers, stated under each table.</p>
 
-<p><b>Deciding where the material goes?</b> <a href="pet-spending.html">Where the material goes</a> has the rate of return per page and slot, the diminishing-returns curves, focus against spread, the optimal order and a calculator for your own stock.</p>
+{analysis}
 <h2>Materials and power</h2>
 <p>Each role pays in its own family, and within a family four of a tier merge into one of the next
 (<code>item_merge</code>): {m4}. Wool, Egg and Essence do not convert into each other; the only way across is the

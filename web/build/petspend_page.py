@@ -25,6 +25,10 @@ COL = {"main": "#a3603f", "side": "#3d6ea8", "idle": "#8a8fa6", "focus": "#a3603
 
 
 def render(layout, charts):
+    return layout("Where the material goes", "Fantomon material analysis.", section(charts), "pettrees", 0)
+
+
+def section(charts):
     import build as _b
     L = _b.L
 
@@ -216,16 +220,15 @@ def render(layout, charts):
     cfg = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
     role_opts = "".join(f'<option value="{r}">{r}</option>' for r in ROLE_TREE)
+    role_opts = "".join(f'<option value="{r}">{r}</option>' for r in ROLE_TREE)
     body = f"""
-<div class="wrap">
-<p class="eyebrow">Reference</p>
-<h1>Where the material goes</h1>
-<p class="lede">A statistical look at the Fantomon ability trees: what each page returns per material, how fast the
-returns fall, what focusing on the formation buys against spreading, the exact order that maximises power per
-material, and a calculator for your own stock. Numbers are the Mythic DPS tree at Fantomon level {LV} unless a
-control says otherwise; the other roles and qualities scale every figure by a constant and keep the same order.</p>
+<h2 id="spend">Where the material goes</h2>
+<p>What each page returns per material, how fast the returns fall, what focusing on the formation buys against
+spreading, the order that maximises power per material, and a calculator for your own stock. Numbers are the
+Mythic DPS tree at Fantomon level {LV} unless a control says otherwise; the other roles and qualities scale every
+figure by a constant and keep the same order.</p>
 
-<h2>The model</h2>
+<h3>The model</h3>
 <p>Power is the game's combat rating: each stat times its weight from <code>prop_cfg</code> (ATK {SCORE['Attack']:g}, DEF
 {SCORE['Defence']:g}, SPD {SCORE['Speed']:g}, HP {SCORE['MaxHp']:g}). A percent node multiplies the Fantomon's own stat
 before scoring, so its worth grows with the Fantomon's level. The Fantomon's whole stat set is then scaled by where it
@@ -234,7 +237,7 @@ sits: the main slot counts {slots[0]:g}, each side slot {slots[1]:g}, and every 
 Crit, accuracy and damage nodes score against your own base stats and are excluded; they sit on every page alike and
 do not change any ranking below.</p>
 
-<h2>Rate of return by page</h2>
+<h3>Rate of return by page</h3>
 <div class="tablewrap"><table class="xp"><thead><tr><th class="num">Page</th><th class="num">Cost</th><th class="num">Cumulative</th>
 <th class="num">Power, flat</th><th class="num">Power, Lv {LV}</th><th class="num">per 100 · main</th><th class="num">side</th><th class="num">idle</th>
 <th class="num">ATK /100</th><th class="num">DEF /100</th><th class="num">HP /100</th><th class="num">SPD /100</th></tr></thead>
@@ -243,21 +246,21 @@ do not change any ranking below.</p>
 columns are flat stat per 100 material, before the slot factor.</caption></div>
 {bar}
 
-<h2>Diminishing returns</h2>
+<h3>Diminishing returns</h3>
 {dim}
 
-<h2>Focus or spread</h2>
+<h3>Focus or spread</h3>
 {strat}
 <div class="tablewrap"><table><thead><tr><th class="num">Budget</th><th class="num">Focus</th><th class="num">Page 1 on everyone first</th><th class="num">Even spread</th></tr></thead>
 <tbody>{cmp_rows}</tbody></table><caption>Power gained at fixed budgets, 1 main + 3 sides + 12 idle, level {LV}. Percentages against focusing.</caption></div>
 
-<h2>The order that maximises power per material</h2>
+<h3>The order that maximises power per material</h3>
 <p>Greedy by return: at every step, buy the page anywhere that returns the most power per material. Because pages
 must be filled in order and slots differ, this is the sequence:</p>
 <div class="tablewrap"><table class="xp"><thead><tr><th class="num">#</th><th>Fantomon</th><th class="num">Page</th><th class="num">Cost</th><th class="num">Spent so far</th><th class="num">Power gained</th><th class="num">per 100</th></tr></thead>
 <tbody>{ladder_rows}</tbody></table></div>
 
-<h2>Your material</h2>
+<h3>Your material</h3>
 <section class="calc" id="petcalc">
   <div class="calc-grid">
     <div class="calc-side">
@@ -271,7 +274,6 @@ must be filled in order and slots differ, this is the sequence:</p>
   <div class="tablewrap"><table><thead><tr><th>Fantomon</th><th class="num">Pages</th><th class="num">Material</th><th class="num">Power</th></tr></thead><tbody id="pc_rows"></tbody></table></div>
   <p class="note" id="pc_note"></p>
 </section>
-</div>
 <script>var PET_SPEND = {cfg};</script>
 <script>
 (function () {{
@@ -325,6 +327,4 @@ must be filled in order and slots differ, this is the sequence:</p>
 }})();
 </script>
 """
-    return layout("Where the material goes", "Rate of return per page and slot of the Sword x Staff Fantomon ability trees, "
-                  "diminishing returns, focus against spread, the optimal order and a calculator.", body, "pettrees", 0)
-
+    return body
