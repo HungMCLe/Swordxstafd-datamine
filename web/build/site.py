@@ -17,6 +17,7 @@ import arena_page
 import xp_page
 import cook_page
 import petability_page
+import petspend_page
 import charts
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -344,6 +345,7 @@ def main():
     n += write("xp.html", xp_page.render(layout, base_tables))
     n += write("cookbook.html", cook_page.render(layout, base_tables, DIST, OUT))
     n += write("pet-trees.html", petability_page.render(layout, base_tables, DIST, OUT))
+    n += write("pet-spending.html", petspend_page.render(layout, charts))
     n += write("combat/index.html", page_combat_index())
     n += write("combat/damage.html", page_damage())
     n += write("combat/elemental.html", page_elemental(ladder))
