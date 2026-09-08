@@ -764,3 +764,11 @@ svg.abtree{width:100%;height:auto;display:block;background:var(--raised);border-
 svg.abtree .links line{stroke:var(--gold-rail);stroke-width:3;stroke-linecap:round;opacity:.75}
 svg.abtree circle.gate{fill:none;stroke:var(--gold);stroke-width:3}
 svg.abtree circle.nd{fill:var(--faint)} svg.abtree text{font:700 11px var(--body);fill:#fff;text-anchor:middle}
+/* cost display switch on the Fantomon trees page */
+.costmode{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{font:600 12.5px var(--body);padding:7px 11px;border:0;background:var(--surface);color:var(--muted);cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0} .seg button.on{background:var(--gold-wash);color:var(--ink)}
+.costs .c-base,.costs .c-top{display:none}
+[data-costs="base"] .costs .c-as,[data-costs="base"] .costs .c-top{display:none} [data-costs="base"] .costs .c-base{display:inline}
+[data-costs="top"] .costs .c-as,[data-costs="top"] .costs .c-base{display:none} [data-costs="top"] .costs .c-top{display:inline}
