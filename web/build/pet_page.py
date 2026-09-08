@@ -158,6 +158,7 @@ def render(layout, dist, out):
 <h1>Pets</h1>
 <p class="lede">Every pet in the game's table, with the skills it has as a baby and the ones it gains as an adult,
 straight from the evolution table. Names, roles, stages and skill text are the game's own.</p>
+<p>Their ability trees, page by page with materials and stats, are on the <a href="pet-trees.html">Fantomon ability trees</a> page.</p>
 {ph_txt}
 <div class="petgrid">{"".join(cards)}</div>
 
