@@ -121,6 +121,32 @@ def render(layout, base_tables, dist, out):
             total[k] += n * mult
         return total
 
+    def top_of(base):
+        """The family's highest tier and how many base units make one of it."""
+        up = {m: (prod, c) for prod, (m, c) in merge.items()}
+        k, mult = base, 1
+        while k in up:
+            k, c = up[k]; mult *= c
+        return k, mult
+
+    def top_equiv(eq):
+        out = {}
+        for base, n in eq.items():
+            top, mult = top_of(base)
+            out[top] = n / mult
+        return out
+
+    def mat_f(i, v):
+        nm = html.escape(loc(f"item_{i}_name", i))
+        img = f'<img src="assets/petmat/item_{i}.png" alt="{nm}" title="{nm}">' if f"item_{i}" in have_mat else nm + " "
+        return f'<span class="mat">{img}<b>{v:,.1f}</b></span>'
+
+    def cost_cell(cost, eq):
+        top = top_equiv(eq)
+        return (f'<span class="c-as">{" ".join(mat(i, n) for i, n in cost.most_common())}</span>'
+                f'<span class="c-base">{" + ".join(mat(i, n) for i, n in eq.items())}</span>'
+                f'<span class="c-top">{" + ".join(mat_f(i, v) for i, v in top.items())}</span>')
+
     def scaled(row, sid):
         s = scale.get(sid, {})
         return {k: int(v * (1 + s.get(k, 0) / 10000.0)) for k, v in row.items()}
@@ -229,7 +255,7 @@ def render(layout, base_tables, dist, out):
         rows_html = ""
         for p in pages:
             rows_html += (f"<tr><td><b>Page {p['pg']}</b><br><span class='hint'>{p['n']} nodes{(' · ' + html.escape(p['gate'])) if p['gate'] else ''}</span></td>"
-                          f"<td>{p['cost_txt']}<br><span class='hint'>= {p['eq_txt']}</span></td>"
+                          f"<td class='costs'>{cost_cell(p['cost'], p['eq'])}</td>"
                           f"<td class='num'><b>{p['flat_p']:,}</b><br><span class='hint'>" + " / ".join(f"Lv {lv}: {v:,}" for lv, v in p['lv_p'].items()) + "</span></td>"
                           f"<td class='small'>{p['grants']}</td></tr>")
         cost_pattern = "".join(
@@ -245,8 +271,7 @@ def render(layout, base_tables, dist, out):
         sections.append(f"""
 <h2 id="tree-{base}">{html.escape(typ)} tree <span class="hint">{html.escape(gen_names.get(1, ''))}</span></h2>
 <ul class="plain">{gen_txt}</ul>
-<p>All ten pages: {" ".join(mat(i, n) for i, n in grand.most_common())} &mdash; the same as <b>{grand_eq[fam_base]:,}</b>
-{html.escape(loc('item_' + fam_base + '_name', fam_base))} once the merges are counted.</p>
+<p class="costs">All ten pages: {cost_cell(grand, grand_eq)}</p>
 <div class="tablewrap"><table class="pages"><thead><tr><th>Page</th><th>To fill it</th><th class="num">Power</th><th>A full page grants</th></tr></thead>
 <tbody>{rows_html}</tbody></table>
 <caption>Power counts the flat stats by the game's own weights; the second line adds the percent nodes' worth for a Fantomon of that level.
@@ -269,7 +294,11 @@ what a full page grants. Later generations of Fantomon use the same tree with a 
 <h2>Materials and power</h2>
 <p>Each role pays in its own family, and within a family four of a tier merge into one of the next
 (<code>item_merge</code>): {m4}. Wool, Egg and Essence do not convert into each other; the only way across is the
-self-choose material boxes. The tables therefore also express each page in the family's base material.</p>
+self-choose material boxes.</p>
+<p class="costmode">Show costs <span class="seg" role="group" aria-label="Cost display">
+<button type="button" data-mode="as" class="on">as listed</button><button type="button" data-mode="base">in the base material</button>
+<button type="button" data-mode="top">in the top tier</button></span>
+<span class="hint">sixteen of the base make one of the top tier; the top-tier figure is not rounded</span></p>
 <p>The game scores stats with fixed weights (<code>prop_cfg</code>): ATK and DEF {SCORE['Attack']:g} per point, SPD
 {SCORE['Speed']:g}, HP {SCORE['MaxHp']:g}. A node's percent bonus multiplies the Fantomon's own stat, so its worth depends on the
 Fantomon's level; the table shows the flat part and the total for a Fantomon at level {", ".join(str(l) for l in REF_LEVELS)}.
@@ -278,5 +307,19 @@ Pages open in order and some need a promotion: page 2 at Expert I, 4 at Champion
 {"".join(sections)}
 </div>
 """
+    body += """
+<script>
+(function () {
+  var wrap = document.querySelector(".wrap"), btns = document.querySelectorAll(".costmode button");
+  function set(m) {
+    wrap.setAttribute("data-costs", m);
+    btns.forEach(function (b) { b.classList.toggle("on", b.getAttribute("data-mode") === m); });
+    try { localStorage.setItem("pw_costmode", m); } catch (e) {}
+  }
+  btns.forEach(function (b) { b.addEventListener("click", function () { set(b.getAttribute("data-mode")); }); });
+  var saved = null; try { saved = localStorage.getItem("pw_costmode"); } catch (e) {}
+  set(saved || "as");
+})();
+</script>"""
     return layout("Fantomon ability trees", "Every page of every Sword x Staff Fantomon ability tree: drawn layout, materials to fill "
                   "each page with merges counted, power, and stats granted.", body, "pettrees", 0)
