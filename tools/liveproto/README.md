@@ -35,6 +35,20 @@ python tools\liveproto\gproto.py decode out\liveproto\streams.json out\liveproto
 
 `schema.json` is derived from the decompiled client and is regenerated, not committed.
 
+Keep what you decode with `roster.py`: it merges every capture into `out/liveproto/roster.json` (one entry
+per player: name, class, level, rank, combat rating, the live `BattleProps`, the full sheet, and a short
+history), prints a table, and exports fighters for the simulators.
+
+```
+python tools\liveproto\roster.py ingest out\liveproto\cap3\decoded.json
+python tools\liveproto\roster.py show Wei Elexarie
+python tools\liveproto\roster.py fighters Wei Nlilee Shortbuslife Awry -o out\liveproto\fighters.json
+```
+
+A live `BattleProps` block was checked against the in-game Character Stats screen of the same player:
+all 33 stats shown there (ATK, DEF, HP, SPD, crit, block, boosts, masteries, affinities, aegis) matched
+to the digit. "Accuracy" on that screen has no prop of its own in the block.
+
 ## What the messages carry
 
 Seen while browsing the Arena for two minutes:
