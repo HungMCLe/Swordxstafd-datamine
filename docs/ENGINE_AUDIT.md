@@ -1,0 +1,122 @@
+# Combat engine audit — what is the client's, what is observed, what is assumed
+
+The team (4v4) and duel (1v1) simulators on Purrwikimania run a re-implementation of *Sword x Staff*'s battle
+rules. The goal is an engine with **nothing invented**: every rule is either read from the client
+(`out/decompiled`, the EC prefabs in `out/ec_decoded`, the config tables), observed in real fights, or clearly
+labelled as an assumption on the page. This table is the inventory. It was rebuilt on 2026-09-09 after a full pass
+over the engine; the fixes made during that pass are listed at the end.
+
+Status codes: **V** verified in client code or data · **O** observed in real fights (rule is server-side) ·
+**A** assumption, labelled on the page · **M** the client has it, the engine does not (labelled on the page).
+
+## Clock and turns
+
+| # | Rule | Status | Evidence |
+|---|---|---|---|
+| C1 | interval = 100000 / sqrt(max(1, SPD) × rank SpeedScale) | V | `BattleFormulaHandler.SpeedToTime`, `fight_rank_offset_damage.SpeedScale` |
+| C2 | first NextTime = interval; earliest acts; equal times keep queue order | V | `FightRoundDriverComponent.AddRuntimeDataToList` (insert before the first strictly greater) |
+| C3 | after acting, NextTime += interval at the current SPD | V/A | plumbing in the client (PreTime/NextTime/ResetTime); the `+=` itself is server-side |
+| C4 | initial queue order = Team 1 slots then Team 2 slots | A | spawn order is not in the client |
+| C5 | round cap = 100 player activations | V | `stage.MaxRound = 100`, `Battle.Round.GloablRoundCountTypes` |
+| C6 | result at the cap: higher remaining HP share wins | A | `FightResult*` are stubs; rule unknown; labelled |
+
+## Cooldowns and availability
+
+| # | Rule | Status | Evidence |
+|---|---|---|---|
+| K1 | ready iff Round − LastRound > CD, counted in the owner's own rounds | V | `FightSkillAgentComponent`; user-verified sequence |
+| K2 | opens the fight on CD+1 unless `ResetCDAtStart`; Rapid Cast's cut applies to the opening count | V/O | `ResetAllSkillCD`; user-verified |
+| K3 | Stun freezes cooldowns | V | `FightStatusSkillStopCdComponent` |
+| K4 | `LimitedTimes` respected | V | `FightSkillComponentInfo.LimitedTimes` |
+| K5 | every ready Technique is cast, in slot order, in one activation; no per-activation cap | V/O | no cap anywhere in the client; 1v1 observation |
+| K6 | no basic attack: with nothing ready the turn passes | V | no basic-attack skill exists in the client (removed from the engine in this audit) |
+| K7 | no "skip a buff that is already up" rule | V | no such rule in the client (removed in this audit) |
+| K8 | Replay (repeat-cast chance) | — | dead config: `Replay.Rate = 0` on every skill |
+
+## The PlayStart phase
+
+| # | Rule | Status | Evidence |
+|---|---|---|---|
+| P1 | skills flagged `TryAtStartType` fire before round 1 | V | `GameStatus.PlayStart`, `skill.TryAtStartType` (AutoAIAtStart / AutoSelfAtStart) |
+| P2 | each tick every fighter fires its next start skill in slot order, the faster one first within the tick | O | order is server-side (`Battle.DrivePlayStartAIInterval` drives it); observed in real fights |
+| P3 | a start cast may walk first like any AI cast | A | no evidence either way |
+
+## Movement
+
+| # | Rule | Status | Evidence |
+|---|---|---|---|
+| M1 | Manhattan distance, 4-way steps, uniform cost | V | `Pos2d`, `AStarUtils` |
+| M2 | Tree/Block cells impassable; players walk None/Shallow | V | `GridMoverComponentInfo.WalkableGroundType` |
+| M3 | living and dead players block cells | V | `GamePosData.BeBlocked`, `DestroyOnDie = false` |
+| M4 | one hop ≤ `MoveDist` (4) | V | `CalcMoveDist` |
+| M5 | no per-turn hop budget; a hop may precede every cast | V | move skills 15300/15310/15320 have no cost, CD or limit; `ActiveSkillWaitActionTypes` |
+| M6 | reachable set = BFS within MoveDist through free cells | V | `GridMoverComponent.CalcAllMovablePos`, `CanStand` |
+| M7 | destination chosen jointly with the aim by the skill's AI list | V/A | `AiPriorityTypes`, `IsReleaseSkillAfterMove`; the scoring loop is server-side |
+| M8 | with nothing castable from anywhere in reach: walk toward the nearest enemy or the taunter | A | server-side; labelled on the page |
+| M9 | caster displacement (`SourceMoveList`: Doom Blade's leap) | V | `FightSKillMoveCfg`: anchor = (RelativeToSource ? caster : aim) + rotated Offset; Distance −1 = nearest standable in `MyMath.LoopOut` ring order |
+| M10 | victim pull / knockback (damage `MoveCfg`, incl. via child skills) | V | same config; Frozen/Immobilize/SuperArmor are not moved |
+| M11 | a walk is resolved at its destination (cells crossed mid-path fire nothing) | A | the client walks a path step by step; labelled |
+
+## Targeting, facing and areas
+
+| # | Rule | Status | Evidence |
+|---|---|---|---|
+| T1 | aim offsets = `FightSkillComponentInfo.Range` | V | prefab |
+| T2 | area = `HitScopCfg` cells around the aim, or the caster when `ActOnSouce`; a summoning hit's area = `SummonScope` | V | prefab, `FightHitSummonComponentInfo.Init` (BaseScopes) |
+| T3 | facing = `Pos2d.LookDirection` (exact diagonals resolve horizontally; (0,0) → Up) | V | client |
+| T4 | flip on X when the aim is left of the caster; unchanged when dx = 0 | V | `CalcFlipX` |
+| T5 | rotation = flip x, then rotate (`CalcLocalToWorldDir`) | V | client |
+| T6 | `HitTargetType` Me/Enemy/Friend/FriendNotMe/All/None | V | `GameUtils` |
+| T7 | `SkillTargetType`: Entity needs a unit on the aim, PosCanStand a free cell (the caster leaps) | V | client |
+| T8 | random-target hits: one pick per HitCfg, with replacement, from the pool; empties allowed unless `AllowEmptyScope` off; `MiniHitTargetCount`; NotSame* flags | V | `FightHitRandomTargetComponentInfo` |
+| T9 | chained hits (Lightning Chain) treated as one pick | A | `FightHitChainedComponent` picker is server-side; one equipped skill |
+| T10 | grid items from summoning hits (Meteoric Flames' Burn cells) | V | `SummonGridItemId` 3320 + status 11542 with `FightStatusMoveNearComponent` (TryAtStart / TryAtEnterRange / TryAtStandRound), 3 creator rounds, `RemoveAtRoundTargetDie` |
+| T11 | creature summons (Waterling Summon, Frenzy Totem, Stonechief Summon) | M | the cast is logged, no creature spawns |
+| T12 | AI chain: the skill's own list, else the chain written on the 14 skills that carry one; the last cast uses `LastAIPriorityTypes` unless `DontKeepDistance` | V/A | criteria names V; the server's default chain is unknown |
+| T13 | criterion semantics (LowerTargetHp = HP ratio, SaferPos = distance to the nearest enemy, ...) | A | names only |
+| T14 | taunt: `Ridicule` forces every plan to include the taunter, else walk to it | V/A | `SkillAiCfg.ReleaseWhileRidicule` semantics; forcing code server-side |
+| T15 | `BattleAISetting` weights (teammate distance, bunching penalty, same-buff weights) | M | unused by the client |
+| T16 | `HitTargetActionType` | — | a no-op in the client |
+
+## Damage and rolls
+
+| # | Rule | Status | Evidence |
+|---|---|---|---|
+| D1 | `Damage()` pipeline: (ATK × coef / psdr + flat) × ATK/(ATK+DEF) × elemental ratio × percent block / prosdr × PvpPropScale; 90% floor on flat adds | V | `BattleFormulaHandler.Damage` |
+| D2 | block first; a blocked hit never crits | V | `CalcDamageTypeImpl` |
+| D3 | crit chance = 0.05 + (CritRatePercent + CritRatePercentValue/Base) − (CritAvoidPercent + CritAvoidPercentValue/Base); mult = max(1.3, 1 + CritPowerPercent − crit avoid) | V | same |
+| D4 | block chance = (BlockPercent + BlockPercentValue/Base) − (BlockAvoidPercent + BlockAvoidPercentValue/Base); divisor = max(1.5, 1 + BlockValuePercent − attacker's block avoid) | V | same |
+| D5 | `HitDamageType.None` hits deal nothing (statuses, moves and child skills still apply) | V | `CalcDamageType` computes only Prop/CustomDamage/SkillCost; `GameRoundUI` (fixed in this audit) |
+| D6 | child skills (`ChildSkillCfg`) cast on every unit the parent hit covered, with their own rows, PvP scale and governor gate | V | `FightDamageComponentInfo.ChildSkillCfg` |
+| D7 | per-target falloff: damage × (1 − p)^n, n = earlier hits of the root skill on that target (`NumOfStart`, `MaxFalloffCount`) | V | `FightStatusDamageFalloffComponentInfo` tooltip (fixed in this audit: was per cast) |
+| D8 | shields absorb before HP; `DamageIgnoreShield` hits | V | |
+| D9 | death save (HpLimit) + heal on the card | V | |
+| D10 | PvP governor: survival floor × skill-rank decay × balance; skill-rank input = per faction max of member average rank, then mean | V | `PVPSkillPropsScaleOnBattleProcessor`, `SkillRankPropScaleCalculator` |
+| D11 | governor scales only prop groups with `AffectedBySkillRank`; never heals or shields | V | `ScaleDamage` gate (fixed in this audit) |
+| D12 | `PvpPropScale` on skill props except CD | V | `ScaleSrcPropsByPvp` |
+| D13 | `Cure()`: (MaxHp × SkillCureByHp \| Attack × SkillCureByAttack \| target MaxHp × SkillCureByTargetHp) + SkillFixedCure, × (1 + CureAddPercent + BeCureAddPercent + CureAdd/Base + BeCureAdd/Base) × (1 + FinalCureScale) | V | `BattleFormulaHandler.Cure`, `CalcCureAdd` |
+| D14 | landing rolls: `EffectRate()` with the cubed-ratio penalty for AbnormalDebuff | V | client |
+| D15 | Blind: the first Attack skill deals 0, then clears | V | |
+
+## Statuses and Charms
+
+| # | Rule | Status | Evidence |
+|---|---|---|---|
+| S1 | durations count the holder's own turns; tick at end of own turn; expiry triggers | V | |
+| S2 | round-start ticks (poison) | V | |
+| S3 | control per `state_mutex`: Stun/Frozen/PhoenixStasis discard move+skill; Restrict/Immobilize discard the move | V | config |
+| S4 | statuses that last N casts (`DurationSkillCount`) | V | `FightStatusHitDmgAddPerComponent` |
+| S5 | Charm passive stats are already in BattleProps, so only procs run | V | `SkillPropChunck`; stats screen equals BattleProps |
+| S6 | when-hit / on-hit conditions: Block, Crit, Damage, Cure flags, `ConditionCount`, `EachRoundMaxCount`, element and skill filters, `SkillTargetType` Enemy | V | `FightStatusDamageBaseComponentInfo`, `FightStatusHitBaseComponentInfo` (fixed in this audit: Rebound fired on every hit) |
+| S7 | a triggered skill with `CanTriggerChild = false` sets off no further hooks | V | `FightSkillComponentInfo.CanTriggerChild` (Radiant Sear's, Rebound's strikes, Burn ticks) |
+| S8 | hook chains stop at depth 4 | A | engine guard against runaway chains; labelled |
+| S9 | modelled Charm components: HitSkill, DamageSkill, RoundStart, RoundEnd, RoundCheck, SkillStart, SkillEnd (every Nth cast), HpDecreaseUnit/HpIncreaseUnit, HpBelow, HpLimit (death save), StatusStackCount, StatusApplyTargetHandle, DoDamageHandle, HitDmgAddPer, RoleDie (revive), DamageCustom (reflect), MoveNear (proximity and grid items), ActionEnd, HitCustomCure (lifesteal), KillSkill, ActionExist | V | `out/ec_decoded` components; `web/build/ec_data.py` |
+| S10 | grid-item statuses count on the creator's rounds and vanish with the creator | V | `RoundTarget Creator`, `StatusAutoRemove.RemoveAtRoundTargetDie` |
+| S11 | Fantomon (pets) | M | off the clock (`FollowMaster`), untargetable; not run |
+
+## Fixes made in the 2026-09-09 audit
+
+- Removed inventions: the basic attack, the redundant-buff skip, one walk per turn, the "keep distance" chain, self-centred aims facing the nearest enemy, a speed-sorted pre-battle list.
+- Added client rules that were missing: crit/block value terms and the attacker's block avoid in the divisor; the full `Cure()`; the governor gate per prop group (heals and shields never scaled); `HitTargetType` None/All; `SkillTargetType` checks; facing and flip rules; `SourceMoveList` leaps and damage `MoveCfg` pulls; random-target picks grouped per HitCfg; child skills on every covered unit; fourteen Charm component types.
+- Found and fixed in the final pass: hits typed `None` were dealing damage (Wind's Delight counted twice, 2.8M in one cast); falloff was counted per cast instead of per target and never reached child hits; when-hit Charms ignored their Block/Crit/Damage flags (Rebound struck back on every hit, killing its attacker in one cast); Meteoric Flames covered one cell instead of its 3×3 and spawned no Burn cells; round-start events were dropped from the log when the unit then cast.
+- The `_duel.json` dataset is rebuilt by `web/build/skills_data.py`; `site.py` only renders pages from it.

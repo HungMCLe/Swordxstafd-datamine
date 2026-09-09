@@ -147,7 +147,7 @@
   }
 
   /* one action's numbers, per hit, through Damage() up to the rolls */
-  function hitParts(att, def, sk, rows) {
+  function hitParts(att, def, sk, rows, srank) {
     var row = sk.id === 0 ? { SkillAttack1: 100 } : (rows || {});
     var ec = sk.ec || null;
     var elemental = sk.ele !== "Physical" && sk.ele !== "None";
@@ -171,15 +171,34 @@
                   flatOf(row, "SkillFixedCure", "SkillFixedCure_g", "SkillFixedCure", att.slevel, att.rank.name)) * pvp;
       return out;
     }
-    function one(coef, withFlat, on, ignoreShield, at) {
-      var base = (att.atk * coef / psdr + (withFlat ? flat : 0)) * defTerm;
+    function one(coef, withFlat, on, ignoreShield, at, pvpH, govH, flatH) {
+      var base = (att.atk * coef / psdr + (withFlat ? (flatH === undefined ? flat : flatH) : 0)) * defTerm;
       var add = ((att.fadd || 0) + (def.fvuln || 0) - (def.fred || 0)) * coef / psdr;
       add = Math.max(-0.9 * base, add);              /* FixedDmgLimitPercent */
-      out.hits.push({ d: (base + add) / prosdr * (eNum / eDen) * pct * pvp, on: on || [],
-                      ignoreShield: !!ignoreShield, at: at || 0 });
+      out.hits.push({ d: (base + add) / prosdr * (eNum / eDen) * pct * (pvpH === undefined ? pvp : pvpH), on: on || [],
+                      ignoreShield: !!ignoreShield, at: at || 0, gov: govH });
     }
     if (ec && ec.hits && ec.hits.length) {
-      ec.hits.forEach(function (h, i) { one((row[h.prop] || 0) / 100, i === 0, h.on, h.ignoreShield, h.at); });
+      /* HitDamageType.None: the hit lands (statuses, child skills) but CalcDamageType computes nothing for it,
+         so it deals no damage; a child skill (ChildSkillCfg) brings its own rows, PvpPropScale and governor gate */
+      var flatDone = false, childFlat = {};
+      ec.hits.forEach(function (h, i) {
+        if (h.type === "None") { out.hits.push({ d: 0, on: h.on || [], ignoreShield: !!h.ignoreShield, at: h.at || 0, noDamage: true }); return; }
+        if (h.child) {
+          var cr = (h.childRows || {})[String(srank)] || {};
+          if (cr.SkillCureByHp || cr.SkillCureByAttack || cr.SkillCureByTargetHp) {
+            /* a healing child (Void Blessing's mend): sized like Cure() on the caster's sheet */
+            var cbase = (cr.SkillCureByHp || 0) / 100 * att.hpMax + (cr.SkillCureByAttack || 0) / 100 * att.atk + (cr.SkillCureByTargetHp || 0) / 100 * (def.hpMax || 0);
+            out.hits.push({ d: 0, on: h.on || [], at: h.at || 0, noDamage: true, heal: Math.max(0, cbase * ((h.childPvp || 10000) / 10000) * (1 + (att.cureadd || 0))) });
+            return;
+          }
+          var first = !childFlat[h.child.eid]; childFlat[h.child.eid] = 1;
+          one((cr[h.prop] || 0) / 100, first, h.on, h.ignoreShield, h.at, (h.childPvp || 10000) / 10000, h.childGov !== false,
+              flatOf(cr, "fx", "fg", "SkillFixedAttack1", att.slevel, att.rank.name));
+          return;
+        }
+        one((row[h.prop] || 0) / 100, !flatDone, h.on, h.ignoreShield, h.at); flatDone = true;
+      });
     } else {
       var coef = ((row.SkillAttack1 || 0) + (row.SkillAttack2 || 0) + (row.SkillAttack3 || 0) + (row.SkillAttack4 || 0)) / 100;
       var cnt = sk.hits || 1;
@@ -193,7 +212,7 @@
   function blockChance(att, def) {
     return Math.min(1, Math.max(0, def.blockrate - att.acc / att.rank.BaseBlockAvoidPercentValue));
   }
-  function blockDiv(def) { return Math.max(C.minBlock, 1 + def.blockeff); }
+  function blockDiv(att, def) { return Math.max(C.minBlock, 1 + def.blockeff - att.acc / att.rank.BaseBlockAvoidPercentValue); }
 
   /* BattleFormulaHandler.EffectRate */
   function landChance(base, byProp, statusType, att, def) {
@@ -358,11 +377,21 @@
         s: S, load: techs, charms: load.slice(TECH), hp: S.hp, t: interval(S), idx: idx, turns: 0,
         cd: openingCds(techs, load.slice(TECH), S.srank),
         uses: techs.map(function () { return 0; }),
-        st: [], shield: 0, charmFired: {}, techCasts: 0
+        st: [], shield: 0, charmFired: {}, techCasts: 0, gridFx: []
       };
     }
     var sides = [side(A, loadA, 0), side(B, loadB, 1)];
     var log = [], turns = 0, MAXT = 600, capped = false, events;
+    /* a grid item under a fighter (MoveNear hook): fires its skill at the creator's rank */
+    function fireGrid(f, unit) {
+      var mn = f.meta.moveNear; if (!mn || unit.hp <= 0) return;
+      var creator = sides[f.creator];
+      if (mn.target === "Enemy" && unit.idx === creator.idx) return;
+      if (mn.maxCount > 0 && f.fired >= mn.maxCount) return;
+      if (rng() >= mn.rate) return;
+      f.fired++;
+      (mn.skills || []).forEach(function (t) { if (rng() < t.chance) fireSkill(t.skill, creator, unit, f.tag); });
+    }
 
     function applyStatus(tgt, sid, creatorIdx, lent) {
       var meta = DATA.statuses[String(sid)];
@@ -391,8 +420,9 @@
       var rows = (entry.r || {})[String(src.s.srank)] || {};
       var srcE = eff(src, sides), tgtE = eff(tgt, sides);
       srcE.hpMax = src.s.hp; tgtE.hpMax = tgt.s.hp;
-      var fake = { id: skillId, name: entry.name, ele: (entry.ec && entry.ec.ele) || "None", ec: entry.ec, hits: 1, r: entry.r || {}, pvp: entry.pvp || 10000 };
-      var parts = hitParts(srcE, tgtE, fake, rows);
+      var fake = { id: skillId, name: entry.name, ele: (entry.ec && entry.ec.ele) || "None", ec: entry.ec, hits: 1, r: entry.r || {}, pvp: entry.pvp || 10000,
+                   gov: entry.gov !== false, noHooks: !!(entry.ec && entry.ec.canTriggerChild === false) };
+      var parts = hitParts(srcE, tgtE, fake, rows, src.s.srank);
       if (parts.heal) {
         /* a heal from a trigger targets whoever the cfg says; fireSkill is called with that as tgt */
         var before = tgt.hp;
@@ -410,7 +440,7 @@
           var target = (o.target === "DamageTarget") ? tgt : src;
           if (rng() < landChance(o.chance, o.byProp, meta.type, srcE, tgtE)) {
             var st = applyStatus(target, o.status, src.idx);
-            if (st && meta.shield) { var amt = shieldSize(meta, src, target) * GOV; if (amt > 0) target.shield = Math.max(target.shield, amt); }
+            if (st && meta.shield) { var amt = shieldSize(meta, src, target); if (amt > 0) target.shield = Math.max(target.shield, amt); }
             if (st && events) events.push({ kind: "status", who: target.idx, name: statusName(meta) });
           }
         });
@@ -430,7 +460,7 @@
       var fake = { id: ch.id, name: ch.name, ele: ch.ele || "Physical", hits: 1, r: ch.r || {}, pvp: ch.pvp || 10000 };
       var parts = hitParts(hE, tE, fake, rows);
       if (parts.heal) {
-        var before = holder.hp; holder.hp = Math.min(holder.s.hp, holder.hp + parts.heal * GOV);
+        var before = holder.hp; holder.hp = Math.min(holder.s.hp, holder.hp + parts.heal);
         if (events) events.push({ kind: "heal", who: holder.idx, amount: holder.hp - before, tag: ch.name });
         return;
       }
@@ -456,7 +486,7 @@
         var lent = (meta.props || (pv.stackTrigger && pv.stackTrigger.status === o.status)) ? null : (ch.props || null);
         var st = applyStatus(tgt, o.status, holder.idx, lent);
         if (!st) return;
-        if (meta.shield) { var amt = shieldSize(meta, holder, tgt) * GOV; if (amt > 0) tgt.shield = Math.max(tgt.shield, amt); }
+        if (meta.shield) { var amt = shieldSize(meta, holder, tgt); if (amt > 0) tgt.shield = Math.max(tgt.shield, amt); }
         if (events) events.push({ kind: "status", who: tgt.idx, name: statusName(meta, lent) + (st.stacks > 1 ? " \u00d7" + st.stacks : ""), tag: ch.name });
         if (pv.stackTrigger && pv.stackTrigger.status === o.status && st.stacks >= pv.stackTrigger.count) {
           st.stacks -= pv.stackTrigger.count;
@@ -489,7 +519,6 @@
           if (row) {
             if (row.SkillCureByHp) out.heal += curveValue(row.SkillCureByHp, who.s.srank, who.s.slevel, who.s.rank.name) / 100 * who.s.hp;
             if (row.SkillFixedCure) out.heal += curveValue(row.SkillFixedCure, who.s.srank, who.s.slevel, who.s.rank.name);
-            out.heal *= GOV;
           }
         });
       });
@@ -517,16 +546,37 @@
       });
     }
 
+    /* the damage-event hooks (FightStatusDamageBaseComponentInfo / FightStatusHitBaseComponentInfo): every true
+       flag restricts the event — Block = only a blocked hit, Crit = only a crit, Damage = only when damage landed;
+       ConditionCount = every Nth event, EachRoundMaxCount = per round of the wearer */
+    function hitMatch(pv, ev, holder) {
+      if (pv.onlyAttack && !ev.isAttack) return false;
+      if (pv.onBlock && !ev.block) return false;
+      if (pv.onCrit && !ev.crit) return false;
+      if (pv.onDamage !== false && !(ev.d + ev.absorbed > 0)) return false;
+      if (pv.onCure) return false;
+      if (pv.elements && pv.elements.length && pv.elements.indexOf(ev.ele) < 0) return false;
+      if (pv.ignoreSkills && pv.ignoreSkills.length && pv.ignoreSkills.indexOf(ev.skillId) >= 0) return false;
+      if (pv.onlySkills && pv.onlySkills.length && pv.onlySkills.indexOf(ev.skillId) < 0) return false;
+      if (pv.conditionCount > 1) { var ck = "cc:" + pv.status; holder.charmFired[ck] = (holder.charmFired[ck] || 0) + 1; if (holder.charmFired[ck] % pv.conditionCount !== 0) return false; }
+      if (pv.eachRoundMax > 0) { var rk = "rm:" + pv.status, cur = holder.charmFired[rk]; if (!cur || cur.turn !== holder.turns) cur = holder.charmFired[rk] = { turn: holder.turns, n: 0 }; if (cur.n >= pv.eachRoundMax) return false; cur.n++; }
+      return true;
+    }
+    var hookDepth = 0;
     function landHits(parts, me, foe, meE, foeE, pick, rolled) {
       var p = critChance(meE, foeE), m = critMult(meE, foeE);
-      var b = blockChance(meE, foeE), bd = blockDiv(foeE);
+      var b = blockChance(meE, foeE), bd = blockDiv(meE, foeE);
       var total = 0, fallCount = 0;
       var blind = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
+      var isAttack = !pick.ec || !pick.ec.skillType || pick.ec.skillType === "Attack" || pick.id === 0;
       parts.hits.forEach(function (h) {
-        var d = h.d * GOV, crit = false, block = false, absorbed = 0, blinded = false;
+        if (!(h.d > 0)) { if (rolled) rolled.push({ d: 0, crit: false, block: false, absorbed: 0, blinded: false, at: h.at || 0, saved: false, skipped: true }); return; }
+        var gated = h.gov === undefined ? pick.gov !== false : h.gov;         /* ScaleDamage: AffectedBySkillRank */
+        var d = h.d * (gated ? GOV : 1), crit = false, block = false, absorbed = 0, blinded = false;
         var fo = null;
         h.on.forEach(function (o) { var mt = DATA.statuses[String(o.status)]; if (mt && mt.falloff) fo = mt.falloff; });
         if (fo) {
+          /* FightStatusDamageFalloffComponent: damage x (1 - per)^n, n = earlier hits of this root skill on the target */
           var steps = Math.max(0, fallCount - (fo.start - 1));
           if (fo.max > 0) steps = Math.min(steps, fo.max);
           d *= Math.pow(1 - fo.pct, steps);
@@ -551,6 +601,12 @@
           }
           firePassive(saved.pv, saved.ch, foe, me, me);
         } else if (d > 0) afterDamage(foe, me);
+        if (pick.noHooks || hookDepth >= 4) return;      /* the skill's CanTriggerChild is off, or a hook chain runs too deep */
+        hookDepth++;
+        var ev = { d: d, absorbed: absorbed, block: block, crit: crit, blinded: blinded, ele: pick.ele || "None", skillId: pick.id, isAttack: isAttack };
+        if (me.hp > 0) procs(me, "hit", foe, foe, function (pv) { return hitMatch(pv, ev, me); });
+        if (foe.hp > 0) procs(foe, "damaged", me, me, function (pv) { return hitMatch(pv, ev, foe); });
+        hookDepth--;
       });
       return total;
     }
@@ -571,6 +627,8 @@
           }
         }
       });
+      /* grid items count on their creator's rounds (RoundTarget Creator, RoundUpdateTiming End) */
+      sides.forEach(function (u) { u.gridFx = u.gridFx.filter(function (f) { if (f.creator !== me.idx) return true; if (f.dur > 0) f.dur--; return f.dur !== 0; }); });
     }
 
     var me = null, foe = null;
@@ -581,11 +639,35 @@
       var meE = eff(me, sides), foeE = eff(foe, sides);
       meE.hpMax = me.s.hp; foeE.hpMax = foe.s.hp;
       var rows = pick.id === 0 ? {} : (pick.r[String(me.s.srank)] || {});
-      var parts = hitParts(meE, foeE, pick, rows);
+      var parts = hitParts(meE, foeE, pick, rows, me.s.srank);
+      /* FightHitRandomTargetComponent: each pick lands on a random cell of the group's pool; in a 1v1 the
+         opponent stands on the aim cell, so a pick hits it with probability 1/cells when empty cells are
+         allowed (MiniHitTargetCount picks are guaranteed), and always when they are not */
+      if (pick.ec && pick.ec.hits && pick.ec.hits.some(function (h) { return h.rnd || h.child; })) {
+        var keep = {}, groups = {}, seenPick = {};
+        pick.ec.hits.forEach(function (h, hi) {
+          if (h.child) {
+            /* ChildSkillCfg: cast on every unit the parent hit covered, at its Rate, when the target is under LessThanHpPer */
+            var par = keep[h.child.of] !== false;
+            var hpOk = !(h.child.hpBelow > 0) || foe.hp / foe.s.hp < h.child.hpBelow;
+            keep[hi] = par && hpOk && rng() < (h.child.chance === undefined ? 1 : h.child.chance);
+            return;
+          }
+          if (!h.rnd) { keep[hi] = true; return; }
+          var gk = h.rnd.g, gs = groups[gk] = groups[gk] || { seen: 0, cells: Math.max(1, (h.rnd.cells || [[0, 0]]).length) };
+          var pk = gk + ":" + (h.pick || 0);
+          if (seenPick[pk] !== undefined) { keep[hi] = seenPick[pk]; return; }     /* one roll per pick, shared by its hits */
+          var idx = gs.seen++;
+          keep[hi] = seenPick[pk] = !h.rnd.allowEmpty || idx < (h.rnd.minHits || 0) || rng() < 1 / gs.cells;
+        });
+        parts.hits = parts.hits.filter(function (h, hi) { return keep[hi] !== false; });
+      }
+      /* a healing child skill mends the unit its parent covered: the caster's own side here */
+      parts.hits.forEach(function (h) { if (h.heal > 0) { var b1 = me.hp; me.hp = Math.min(me.s.hp, me.hp + h.heal); if (events) events.push({ kind: "heal", who: me.idx, amount: me.hp - b1, tag: pick.name }); } });
       var isAttack = !pick.ec || pick.ec.skillType === "Attack" || pick.id === 0;
       var target = (pick.ec && (pick.ec.target === "Ally" || pick.ec.target === "Me" || pick.ec.target === "Self")) ? me : foe;
       if (parts.heal) {
-        var before = me.hp; me.hp = Math.min(me.s.hp, me.hp + parts.heal * GOV);
+        var before = me.hp; me.hp = Math.min(me.s.hp, me.hp + parts.heal);
         if (events) events.push({ kind: "heal", who: me.idx, amount: me.hp - before, tag: pick.name });
       }
       if (parts.hits.length && target === foe) total = landHits(parts, me, foe, meE, foeE, pick, rolled);
@@ -606,7 +688,7 @@
           if (rng() < chance) {
             var st = applyStatus(tgt, o.status, me.idx);
             if (st && meta.shield) {
-              var amt = shieldSize(meta, me, tgt) * GOV;
+              var amt = shieldSize(meta, me, tgt);
               if (amt > 0) tgt.shield = Math.max(tgt.shield, amt);
             }
             if (st && events) events.push({ kind: "status", who: tgt.idx, name: statusName(meta) });
@@ -616,13 +698,28 @@
       /* Blind is spent by the first attack skill of the turn */
       var bl = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
       if (bl && isAttack) removeStatus(me, bl);
-      if (total > 0) {
-        procs(me, "hit", foe, foe, function (pv) { return !(pv.onlyAttack && !isAttack); });
-        procs(foe, "damaged", me, me);
-      }
+      /* FightHitSummon with a grid item (Meteoric Flames' Burn cells): the opponent's cell rolls its Rate; the
+         cell then fires its skill at once (TryAtStart) and whenever the opponent starts a round on it
+         (TryAtStandRound), for DurationRound rounds of the caster */
+      (pick.ec && pick.ec.hits || []).forEach(function (h, hi) {
+        if (!h.summon || !h.summon.gridItem || !(h.summon.gridStatuses || []).length || target !== foe) return;
+        var ci = (h.cells || []).map(function (c) { return c[0] + "," + c[1]; }).indexOf("0,0");
+        var rate = ci >= 0 && h.summon.rates ? h.summon.rates[ci] : h.summon.rate;
+        if (rate === undefined) rate = 1;
+        if (rng() >= rate) return;
+        h.summon.gridStatuses.forEach(function (sid) {
+          var meta = DATA.statuses[String(sid)]; if (!meta || !meta.moveNear) return;
+          var f = { meta: meta, creator: me.idx, dur: meta.dur, tag: pick.name, fired: 0 };
+          foe.gridFx.push(f);
+          if (events) events.push({ kind: "status", who: foe.idx, name: (meta.ele && meta.ele !== "None" ? meta.ele + " cell" : "grid item"), tag: pick.name });
+          if (meta.moveNear.onStart) fireGrid(f, foe);
+        });
+      });
       if (slot >= 0) {
         me.cd[slot] = cdOf(pick, me.s.srank) + 1; me.uses[slot]++;
         me.techCasts++;
+        /* statuses that last N of the holder's casts (DurationSkillCount) */
+        me.st.slice().forEach(function (st) { if (st.skills > 0 && !(st.meta.onlyAttack && !isAttack)) { st.skills--; if (st.skills <= 0) removeStatus(me, st); } });
         procs(me, "skillEnd", foe, foe, function (pv) { return me.techCasts % pv.every === 0; });
       }
       return { rolled: rolled, total: total };
@@ -655,7 +752,7 @@
       var i = Math.abs(gap) < 1e-9 ? (rng() < 0.5 ? 0 : 1) : (gap < 0 ? 0 : 1);
       me = sides[i]; foe = sides[1 - i];
       turns++; me.turns++;
-      events = wantLog ? [] : null;
+      events = wantLog ? [] : null; var startEv = events;   /* round-start events ride with the first entry of the turn */
 
       /* round-start triggers: DoT ticks on me, regen charms */
       me.st.slice().forEach(function (st) {
@@ -666,6 +763,8 @@
         });
       });
       procs(me, "roundStart", foe, me);
+      /* starting a round on a grid item (TryAtStandRound) */
+      me.gridFx.slice().forEach(function (f) { if (f.meta.moveNear.onStand) fireGrid(f, me); });
       if (me.hp <= 0 || foe.hp <= 0) { if (wantLog) log.push(entry(me, null, -1, [], 0, events, "start")); break; }
 
       var skip = me.st.filter(function (x) { return SKIP_ACTIONS[x.meta.action]; })[0];
@@ -682,18 +781,17 @@
           if (!cand || me.cd[k] !== 0) continue;
           var lim = cand.ec ? cand.ec.limitedTimes : -1;
           if (lim > 0 && me.uses[k] >= lim) continue;
-          if (redundant(cand, me, foe)) continue;
-          events = wantLog ? [] : null;
+          events = wantLog ? (startEv && startEv.length ? startEv.splice(0) : []) : null;
           var r = cast(cand, k);
           casts++;
           if (wantLog) log.push(entry(me, cand, k, r.rolled, r.total, events, null, sub++));
         }
         if (casts === 0) {
-          /* nothing ready: a basic attack, and the Charms that key off a Technique-less turn */
-          events = wantLog ? [] : null;
-          var rb = cast(BASIC, -1);
+          /* nothing ready: there is no basic attack in the client, so the turn passes; the Charms that key
+             off a Technique-less turn still fire */
+          events = wantLog ? (startEv && startEv.length ? startEv.splice(0) : []) : null;
           procs(me, "roundCheck", foe, me);
-          if (wantLog) log.push(entry(me, BASIC, -1, rb.rolled, rb.total, events, null, 0));
+          if (wantLog) log.push(entry(me, null, -1, [], 0, events, "idle", 0));
         }
       }
       procs(me, "roundEnd", foe, me);
@@ -703,7 +801,7 @@
     function entry(me, pick, slot, rolled, total, ev, note, sub) {
       var foe = sides[1 - me.idx];
       return { t: Math.round(me.t), side: me.idx, who: WHO[me.idx], slot: slot, sub: sub || 0,
-               skill: pick ? (note === "prebattle" ? pick.name + " (before battle)" : pick.name) : (note === "start" ? "—" : note + " — no action"),
+               skill: pick ? (note === "prebattle" ? pick.name + " (before battle)" : pick.name) : (note === "start" ? "—" : note === "idle" ? "no Technique ready" : note + " — no action"),
                skillId: pick ? pick.id : 0, ele: pick ? pick.ele : "None", hits: rolled, dmg: total,
                dur: pick && pick.ec && pick.ec.dur ? pick.ec.dur : 0.8,
                events: ev || [], turn: me.turns, cd: me.cd.slice(), note: note,

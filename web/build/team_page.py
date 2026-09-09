@@ -47,10 +47,13 @@ shows the boxes with two cells of margin; fighters may wander further during the
 <p><b>Reach and area come from each skill's prefab.</b> A skill lists the cells, relative to the caster, where its
 aim point may be placed (<code>FightSkillComponentInfo.Range</code>, near to far), and every hit lists the cells
 it covers around that aim point, or around the caster when the hit acts on its source
-(<code>HitScopCfg</code>, <code>HitCfg.ActOnSouce</code>). Areas are authored facing up and turned to face the
-aim, as <code>CalcLocalToWorldDir</code> does. Heart of Challenge, for instance, has no reach of its own but
-covers every cell within three of the Paladin; Howling Hurricane reaches five cells away and covers a
-two-cell diamond there.</p>
+(<code>HitScopCfg</code>, <code>HitCfg.ActOnSouce</code>; a summoning hit's area is its <code>SummonScope</code>).
+Areas are authored facing up and turned to face the aim as <code>CalcLocalToWorldDir</code> does: the facing is
+<code>Pos2d.LookDirection</code> (exact diagonals resolve sideways), and the area flips on X when the aim is to the
+caster's left (<code>CalcFlipX</code>). What the aim may sit on is the skill's <code>SkillTargetType</code>: an
+<i>Entity</i> skill needs a unit on the aim, a <i>PosCanStand</i> skill a free cell. Heart of Challenge, for
+instance, has no reach of its own but covers every cell within three of the Paladin; Meteoric Flames reaches five
+cells away and covers the 3&times;3 square there.</p>
 <p><b>A turn is move, then cast; the choice follows the client's own AI lists.</b> Whoever comes due next on
 the SPD clock acts (equal times keep queue order) and casts every ready Technique in slot order, each onto its
 own cooldown counted in that fighter's turns. For each cast the fighter weighs every cell it can walk to
@@ -65,9 +68,48 @@ and no use limit (the player prefab's hop, back-step and fixed-speed moves), a c
 progress and then fires (<code>ActiveSkillWaitActionTypes</code>, <code>IsReleaseSkillAfterMove</code>), and
 nothing in the client counts hops per turn; only <code>MoveDist</code> caps each hop. So every cast here may be
 preceded by a fresh hop from where the fighter now stands, and a caster will step in for one skill and back off
-for its last. A basic attack on an adjacent enemy happens when nothing is ready, and a fighter with nothing in
-reach walks toward the nearest enemy. A fallen player keeps its cell (<code>DestroyOnDie = false</code>), so
-bodies block paths.</p>
+for its last. There is no basic attack in the client: a fighter with nothing ready passes its turn. A fighter with
+nothing in reach walks toward the nearest enemy, or its taunter &mdash; that walk is this page's assumption, since
+the server's idle rule is not in the client. A fallen player keeps its cell (<code>DestroyOnDie = false</code>), so
+bodies block paths. Skills move fighters too: the caster's own dash or leap (<code>SourceMoveList</code>, Doom
+Blade) and the victim's pull or knockback (the damage's <code>MoveCfg</code>, Hunter's Judgment, Lunarwater
+Threads) land on the nearest free cell in the client's ring order when the exact cell is taken; a Frozen,
+Immobilized or Super Armor unit is not moved.</p>
+<p><b>Damage, hit by hit.</b> Every hit runs the client's <code>Damage()</code>: attack times the skill's
+coefficient over the target's per-rank PvP scaler, plus the flat term, times ATK/(ATK+DEF), times the elemental
+ratio, times the percent block, over the class scaler, times the skill's <code>PvpPropScale</code>. Block is
+rolled first and a blocked hit cannot crit (<code>CalcDamageTypeImpl</code>): the chances add the flat value
+forms over their per-rank bases (Crit Rate + Crit Rate Value / base, Block Rate + Block Value / base, and the
+attacker's Accuracy against both), a crit multiplies by at least 1.3, a block divides by at least 1.5. Heals
+run <code>Cure()</code>: max HP, attack or the target's max HP times the skill's cure coefficient plus the fixed
+cure, times (1 + Healing Boost + Healing Received + their value forms over their bases), times the final cure scale.
+The PvP governor (<code>PVPSkillPropsScaleOnBattleProcessor</code>, shown under the odds) scales only the damage
+of skills whose prop group is <code>AffectedBySkillRank</code>; heals and shields are never governed. A hit
+typed <code>HitDamageType.None</code> deals nothing itself but still applies its statuses, forced moves and child
+skills: Wind's Delight's damage is its child skill, seven waves each hitting the plus around a random enemy, and
+Hunter's Judgment's grab is what drags the target. A child skill (<code>ChildSkillCfg</code>) is cast on every unit
+its parent hit covered, with its own numbers. Per-target falloff (<code>FightStatusDamageFalloffComponent</code>)
+multiplies each repeat hit on the same target by (1&nbsp;&minus;&nbsp;p): Wind's Delight decays 35% per repeat,
+Divine Wrath 40%. Random-target hits (<code>FightHitRandomTargetComponent</code>) draw one cell per pick, with
+replacement, from the group's pool; empty cells count unless <code>AllowEmptyScope</code> is off, and
+<code>MiniHitTargetCount</code> picks must land on a unit.</p>
+<p><b>Charms fire on the events their components name.</b> A when-hit Charm's component
+(<code>FightStatusDamageSkillComponent</code>) carries its own conditions and they are honoured: Rebound strikes
+back only on a hit the wearer <i>blocks</i> (<code>Block = true</code>), Counter Blade on any damage taken, a Charm
+with <code>ConditionCount</code> every Nth event, one with <code>EachRoundMaxCount</code> at most that often per
+round. On-hit Charms (<code>FightStatusHitSkillComponent</code>, Radiant Sear, Blade of Judgment) fire per
+damaging hit under the same flags. The strike a Charm fires is a skill of its own, and when that skill's
+<code>CanTriggerChild</code> is off (Radiant Sear's, Rebound's, a Burn tick) it cannot set off further hooks;
+this page also stops any hook chain at depth four as a guard of its own. Also run from the prefabs: Linked
+Misfortune, Shadow Erosion, Curse Resonance and Pursuit of Victory, Resurrection, Reflective Armor, Repelling Wind,
+Gale Shield, Ripple Impact, Blade of Lament, Soul Splash, Defensive Assault, Eye for an Eye, and the HP-unit
+Charms whose stacks come off again as HP climbs back.</p>
+<p><b>Burning cells.</b> Meteoric Flames is a summoning hit: it deals its Fire damage to the 3&times;3 and every
+cell of it rolls 60% to spawn grid item 3320 with a Fire status whose <code>MoveNear</code> hook fires the Burn
+skill at an enemy standing there when the cell appears (<code>TryAtStart</code>), at one arriving on it
+(<code>TryAtEnterRange</code>) and at one starting its round on it (<code>TryAtStandRound</code>), for three of the
+caster's rounds, or until the caster falls. The board marks such cells. A walk here is resolved at its
+destination, so cells crossed mid-path do not fire; the client's step-by-step path is server-side.</p>
 <p><b>Before round 1: the PlayStart phase.</b> The fight has a <code>PlayStart</code> status before
 <code>Play</code>, during which the AI is driven on a fixed interval (<code>Battle.DrivePlayStartAIInterval</code>),
 and the skill table marks what fires then (<code>skill.TryAtStartType</code>: Heart of Challenge, Valor Surge,
@@ -77,12 +119,16 @@ does, is that every fighter fires its next start skill on each tick, the faster 
 both sides' opening buffs land before the faster tank's taunt. A taunt such as Heart of Challenge lands
 <i>Ridicule</i> on every enemy within three cells, and for as long as that lasts each of them must aim at the
 taunter, walking to it if needed. Every other skill with a cooldown opens the fight on it unless it is a Zero
-Initial CD skill.</p>
-<p><b>Not modelled.</b> Fantomon ride along off the clock and are untargetable in the real fight; their
-triggered skills are not run here. The end-of-fight rule at the 100-round cap is server-side and unknown, so
-a capped fight is scored by remaining HP. The AI's scoring loop is server-side: the criteria and each
-skill's ordering are the client's, their default ordering and the global weights in
-<code>BattleAISetting</code> (preferred distance to teammates, bunching penalty) are not modelled.</p>
+Initial CD skill. Control comes from the client's <code>state_mutex</code> table: Stun, Frozen and Phoenix Stasis
+discard both move and skill, Restrict and Immobilize discard the move only.</p>
+<p><b>Not modelled.</b> Creature summons (Waterling Summon, Frenzy Totem, Stonechief Summon): the cast is logged
+but no creature appears. Fantomon ride along off the clock and are untargetable in the real fight; their triggered
+skills are not run here. Chained hits (Lightning Chain) are treated as one pick. The end-of-fight rule at the
+100-round cap is server-side and unknown, so a capped fight is scored by remaining HP. The AI's scoring loop is
+server-side: the criteria and each skill's ordering are the client's, their default ordering and the global
+weights in <code>BattleAISetting</code> (preferred distance to teammates, bunching penalty) are not modelled.
+The full rule-by-rule audit of this engine against the client is in
+<a href="https://github.com/HungMCLe/Swordxstafd-datamine/blob/claude/swordxstaff-datamining-2p1ywk/docs/ENGINE_AUDIT.md">docs/ENGINE_AUDIT.md</a>.</p>
 """
 
 

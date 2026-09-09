@@ -16,15 +16,20 @@ CLASS_NAME = {"Zhanshi": "Warrior", "Fashi": "Mage", "Huwei": "Knight", "Doushi"
 PCT = {"CritRatePercent": "cr", "CritPowerPercent": "cd", "CritAvoidPercent": "critres", "BlockPercent": "blockrate",
        "BlockValuePercent": "blockeff", "BlockAvoidPercent": "blockavoid", "DmgAddPercent": "boost",
        "DmgReducePercent": "dmgres", "PlayerDmgAddScale": "pvpadd", "PlayerDmgReduceScale": "pvpres",
-       "CureAddPercent": "cureadd"}
+       "CureAddPercent": "cureadd", "BeCureAddPercent": "becureadd", "FinalCureScale": "finalcure",
+       "DodgePercent": "dodge"}
 FLAT = {"MaxHp": "hp", "Attack": "atk", "Defence": "def", "Speed": "spd", "ElementMaster": "mast",
         "KongFuMaster": "kfm", "ElementResistance": "eres", "KongFuResistance": "kfr", "EffectRate": "erate",
-        "EffectDodge": "edodge", "MoveDist": "move"}
+        "EffectDodge": "edodge", "MoveDist": "move",
+        # flat "value" forms that join the percent rolls divided by their per-rank base (CalcDamageTypeImpl, CalcCureAdd)
+        "CritRatePercentValue": "crv", "CritAvoidPercentValue": "crav", "BlockPercentValue": "bv",
+        "BlockAvoidPercentValue": "bav", "CureAdd": "cureaddv", "BeCureAdd": "becureaddv", "CritPower": "critpowerv",
+        "BlockValue": "blockvaluev"}
 ELE = ["Wind", "Water", "Fire", "Light", "Dark"]
 BASES = ["BaseElementMaster", "BaseElementResistance", "BaseKongFuMaster", "BaseKongFuResistance",
          "BaseCritRatePercentValue", "BaseCritAvoidPercentValue", "BaseBlockPercentValue",
          "BaseBlockAvoidPercentValue", "BaseElementAdd", "BaseElementReduce", "BaseEffectRate", "BaseEffectDodge",
-         "PlayerSkillDmgReduceScale", "ProSkillDmgReduceScale"]
+         "PlayerSkillDmgReduceScale", "ProSkillDmgReduceScale", "BaseCureAdd", "BaseBeCureAdd"]
 
 
 def sheet_of(bp: dict) -> dict:

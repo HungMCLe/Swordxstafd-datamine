@@ -67,7 +67,7 @@
   var PROP2FLAT = { FixedStatusDmgAdd: "fadd", FixedDmgAdd: "fadd", DmgAdd: "fadd",
                     FixedStatusDmgReduce: "fred", FixedDmgReduce: "fred", DmgReduce: "fred",
                     FixedDmgVulnerable: "fvuln", FixedstatusDmgVulnerable: "fvuln" };
-  var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "blockavoid", "pvpadd", "pvpres", "cureadd", "vuln"];
+  var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "blockavoid", "pvpadd", "pvpres", "cureadd", "becureadd", "finalcure", "dodge", "vuln"];
 
   /* fold one prop row (a status's numbers) into a working sheet, in percent units */
   function foldProps(e, row, srank, slevel, rank) {
@@ -93,8 +93,14 @@
     Object.keys(f.sheet.bases || {}).forEach(function (k) { if (f.sheet.bases[k]) rank[k] = f.sheet.bases[k]; });
     var s = { rank: rank, vuln: 0, fadd: 0, fred: 0, fvuln: 0, aff: {}, aegis: {} };
     ["hp", "atk", "def", "spd", "mast", "kfm", "eres", "kfr", "erate", "edodge", "move",
-     "cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "blockavoid", "pvpadd", "pvpres", "cureadd"]
+     "cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "blockavoid", "pvpadd", "pvpres", "cureadd",
+     "becureadd", "finalcure", "dodge", "crv", "crav", "bv", "bav", "cureaddv", "becureaddv", "critpowerv", "blockvaluev"]
       .forEach(function (k) { s[k] = f.sheet[k] || 0; });
+    /* CalcDamageTypeImpl: the flat value forms join their percent divided by the same side's base */
+    if (rank.BaseCritRatePercentValue > 0) s.cr += s.crv / rank.BaseCritRatePercentValue;
+    if (rank.BaseCritAvoidPercentValue > 0) s.critres += s.crav / rank.BaseCritAvoidPercentValue;
+    if (rank.BaseBlockPercentValue > 0) s.blockrate += s.bv / rank.BaseBlockPercentValue;
+    if (rank.BaseBlockAvoidPercentValue > 0) s.blockavoid += s.bav / rank.BaseBlockAvoidPercentValue;
     ELES.forEach(function (e) { s.aff[e] = (f.sheet.aff || {})[e] || 0; s.aegis[e] = (f.sheet.aegis || {})[e] || 0; });
     s.hp = Math.max(1, s.hp); s.atk = Math.max(1, s.atk); s.spd = Math.max(1, s.spd);
     return s;
@@ -111,6 +117,16 @@
       if (!props) return;
       var row = props[String(st.rank)];
       if (row) for (var i = 0; i < times; i++) foldProps(e, row, st.rank, st.level, ents[st.creator].s.rank);
+    });
+    /* FightStatusActionExistComponent (Defensive Assault): a status that holds only while the wearer has a shield */
+    if (u.shield > 0) (u.charms || []).forEach(function (ch) {
+      (ch && ch.sk.passive || []).forEach(function (pv) {
+        if (pv.kind !== "whileAction" || (pv.actions || []).indexOf("Shield") < 0) return;
+        (pv.statuses || []).forEach(function (o) {
+          var meta = DATA.statuses[String(o.status)], row = meta && meta.props && meta.props[String(ch.rank)];
+          if (row) foldProps(e, row, ch.rank, ch.level, u.s.rank);
+        });
+      });
     });
     PCT_FIELDS.forEach(function (f) { e[f] /= 100; });
     e.atk = Math.max(1, e.atk); e.spd = Math.max(1, e.spd); e.def = Math.max(0, e.def);
@@ -142,9 +158,16 @@
     var pvp = (sk.pvp || 10000) / 10000;
     var flat = flatOf(row, "fx", "fg", "SkillFixedAttack1", slevel, att.rank.name);
     var out = { hits: [], heal: 0 };
-    if (ec && ec.skillType === "Cure" || (row.SkillCureByHp && !row.SkillAttack1)) {
-      out.heal = ((row.SkillCureByHp || 0) / 100 * att.hpMax +
-                  flatOf(row, "SkillFixedCure", "SkillFixedCure_g", "SkillFixedCure", slevel, att.rank.name)) * pvp * (1 + (att.cureadd || 0));
+    var cureProp = ec && ec.hits && ec.hits.length ? ec.hits[0].prop : null;
+    if ((ec && ec.skillType === "Cure") || /^SkillCureBy/.test(cureProp || "") || ((row.SkillCureByHp || row.SkillCureByAttack || row.SkillCureByTargetHp) && !row.SkillAttack1)) {
+      /* Cure(): base = MaxHp x SkillCureByHp | Attack x SkillCureByAttack | target MaxHp x SkillCureByTargetHp, + SkillFixedCure;
+         x (1 + CureAddPercent(src) + BeCureAddPercent(tgt) + CureAdd/BaseCureAdd + BeCureAdd/BaseBeCureAdd) x (1 + FinalCureScale) */
+      var base = (row.SkillCureByHp || 0) / 100 * att.hpMax + (row.SkillCureByAttack || 0) / 100 * att.atk + (row.SkillCureByTargetHp || 0) / 100 * (def.hpMax || 0) +
+                 flatOf(row, "SkillFixedCure", "SkillFixedCure_g", "SkillFixedCure", slevel, att.rank.name);
+      var cadd = (att.cureadd || 0) + (def.becureadd || 0) +
+                 (att.rank.BaseCureAdd > 0 ? (att.cureaddv || 0) / att.rank.BaseCureAdd : 0) +
+                 (def.rank.BaseBeCureAdd > 0 ? (def.becureaddv || 0) / def.rank.BaseBeCureAdd : 0);
+      out.heal = Math.max(0, base * pvp * (1 + cadd) * (1 + (att.finalcure || 0)));
       return out;
     }
     function one(coef, withFlat, on, ignoreShield, at) {
@@ -154,7 +177,13 @@
       out.hits.push({ d: (base + add) / prosdr * (eNum / eDen) * pct * pvp, on: on || [], ignoreShield: !!ignoreShield, at: at || 0 });
     }
     if (ec && ec.hits && ec.hits.length) {
-      ec.hits.forEach(function (h, i) { one((row[h.prop] || 0) / 100, i === 0, h.on, h.ignoreShield, h.at); });
+      /* HitDamageType.None: the hit lands (statuses, child skills, forced moves) but CalcDamageType computes nothing
+         for it, so it deals no damage; the flat term joins the first damaging hit */
+      var flatDone = false;
+      ec.hits.forEach(function (h, i) {
+        if (h.type === "None") { out.hits.push({ d: 0, on: h.on || [], ignoreShield: !!h.ignoreShield, at: h.at || 0, noDamage: true }); return; }
+        one((row[h.prop] || 0) / 100, !flatDone, h.on, h.ignoreShield, h.at); flatDone = true;
+      });
     } else {
       var coef = ((row.SkillAttack1 || 0) + (row.SkillAttack2 || 0) + (row.SkillAttack3 || 0) + (row.SkillAttack4 || 0)) / 100;
       var cnt = sk.hits || 1;
@@ -162,10 +191,11 @@
     }
     return out;
   }
+  /* CalcDamageTypeImpl: block is rolled first and a blocked hit never crits; the value forms are already folded */
   function critChance(att, def) { return Math.min(1, Math.max(0, 0.05 + att.cr - def.critres)); }
   function critMult(att, def) { return Math.max(C.minCrit, 1 + att.cd - def.critres); }
   function blockChance(att, def) { return Math.min(1, Math.max(0, def.blockrate - att.blockavoid)); }
-  function blockDiv(def) { return Math.max(C.minBlock, 1 + def.blockeff); }
+  function blockDiv(att, def) { return Math.max(C.minBlock, 1 + def.blockeff - att.blockavoid); }
   function landChance(base, byProp, statusType, att, def) {
     if (!byProp) return base;
     var br = att.rank.BaseEffectRate || 1, bd = def.rank.BaseEffectDodge || 1;
@@ -197,9 +227,16 @@
       return r;
     }));
     var survival = ratio > G.minSurvival ? G.minSurvival / ratio : 1;
-    var ranksAll = [];
-    sheets.forEach(function (s) { (s.skillRanks || []).forEach(function (r) { ranksAll.push(r); }); });
-    var fightRank = ranksAll.length ? Math.round(ranksAll.reduce(function (a, b) { return a + b; }, 0) / ranksAll.length) : 0;
+    /* SkillRankPropScaleCalculator: per faction the MAX over its members of their average skill rank, then the
+       average of the faction maxima */
+    var facMax = [0, 0];
+    sheets.forEach(function (s, i) {
+      var rs = s.skillRanks || [];
+      var avg = rs.length ? rs.reduce(function (a, b) { return a + b; }, 0) / rs.length : 0;
+      var f = i < 4 ? 0 : 1;
+      facMax[f] = Math.max(facMax[f], avg);
+    });
+    var fightRank = Math.round((facMax[0] + facMax[1]) / 2);
     var days = Math.max(0, Math.round(parseFloat($("serverdays").value) || 0));
     var keys = Object.keys(G.avgSkillRank).map(Number).sort(function (a, b) { return a - b; });
     var serverRank = G.avgSkillRank[String(Math.min(days, keys[keys.length - 1]))] || G.avgSkillRank[String(keys[keys.length - 1])];
@@ -214,8 +251,6 @@
     return { scale: survival * rankScale * balance, parts: { survival: survival, ratio: ratio, rankScale: rankScale, fightRank: fightRank, serverRank: serverRank, balance: balance } };
   }
 
-  var BASIC = { id: 0, name: "Basic attack", ele: "Physical", hits: 1, r: {},
-                ec: { target: "Enemy", skillType: "Attack", range: [[1, 0], [-1, 0], [0, 1], [0, -1]], hits: [{ prop: "SkillAttack1", cells: [[0, 0]], on: [], onSource: false }] } };
   function shieldSize(meta, creator, holder, rank, level) {
     var row = meta.props && meta.props[String(rank)];
     if (!row) return 0;
@@ -247,7 +282,11 @@
     });
     return any && all && sk.ec.skillType !== "Attack";
   }
-  var SKIP_ACTIONS = { Stun: 1, Frozen: 1 };
+  /* state_mutex table: which of a fighter's own actions a status state discards. Stun, Frozen and PhoenixStasis
+     discard both Move and Skill; Restrict and Immobilize discard Move only; the rest discard nothing */
+  var SKIP_ACTIONS = { Stun: 1, Frozen: 1, PhoenixStasis: 1 };
+  var NO_MOVE = { Stun: 1, Frozen: 1, PhoenixStasis: 1, Restrict: 1, Immobilize: 1 };
+  function rooted(u) { return u.st.some(function (x) { return NO_MOVE[x.meta.action]; }); }
   function cdOf(t) { var row = t.sk.r[String(t.rank)] || {}; return Math.max(0, Math.round(row.CD || 0)); }
   function cdStartOf(charms) {
     var cut = 0;
@@ -305,57 +344,160 @@
     s.skillRanks = techs.concat(charms).filter(Boolean).map(function (t) { return t.rank; });
     return { i: idx, side: side, name: f.name, cls: f.cls, f: f, s: s, techs: techs, charms: charms,
              hp: s.hp, shield: 0, st: [], cd: openingCds(techs, charms), uses: techs.map(function () { return 0; }),
-             t: interval(s), turns: 0, pos: { x: pos.x, y: pos.y }, alive: true, charmFired: {}, techCasts: 0, order: idx, taunt: null };
+             t: interval(s), turns: 0, pos: { x: pos.x, y: pos.y }, alive: true, charmFired: {}, techCasts: 0,
+             order: idx, taunt: null, flip: side === 1 };   /* Team 2 starts facing down the board */
   }
+
+  /* ---------- the grid rules the client ships ----------
+     Pos2d.LookDirection: (0,0) -> Up; dx>0: Up if dy>dx, Down if dy<-dx, else Right; dx<0 mirrored -> Left.
+     CalcFlipX: dx>0 -> not flipped, dx<0 -> flipped, dx==0 -> unchanged.
+     CalcLocalToWorldDir: flip x, then rotate by the direction (Up id, Down negate, Left (-y,x), Right (y,-x)).
+     MyMath.LoopOut: rings by Manhattan distance, each ring grown from the previous with FourDirs
+     Down, Left, Up, Right; the first standable cell in that order wins. */
+  function facing(from, to) {
+    var dx = to.x - from.x, dy = to.y - from.y;
+    if (!dx && !dy) return "U";
+    if (dx > 0) return dy > dx ? "U" : (dy < -dx ? "D" : "R");
+    return dy > -dx ? "U" : (dy < dx ? "D" : "L");
+  }
+  function flipFor(from, to, prev) { var dx = to.x - from.x; return dx > 0 ? false : (dx < 0 ? true : !!prev); }
+  function turn(c, dir, flip) {
+    var x = flip ? -c[0] : c[0], y = c[1];
+    if (dir === "U") return [x, y];
+    if (dir === "D") return [-x, -y];
+    if (dir === "L") return [-y, x];
+    return [y, -x];
+  }
+  var FOUR = [[0, -1], [-1, 0], [0, 1], [1, 0]];
+  var RINGS = (function () {           /* offsets in LoopOut order, rings 0..10 */
+    var out = [[0, 0]], seen = { "0,0": 1 }, ring = [[0, 0]];
+    for (var d = 1; d <= 10; d++) {
+      var next = [];
+      ring.forEach(function (c) { FOUR.forEach(function (f) { var k = (c[0] + f[0]) + "," + (c[1] + f[1]); if (!seen[k]) { seen[k] = 1; next.push([c[0] + f[0], c[1] + f[1]]); } }); });
+      out = out.concat(next); ring = next;
+    }
+    return out;
+  })();
+  function opposite(dir) { return dir === "U" ? "D" : dir === "D" ? "U" : dir === "L" ? "R" : "L"; }
+  function dirVec(dir) { return dir === "U" ? [0, 1] : dir === "D" ? [0, -1] : dir === "L" ? [-1, 0] : [1, 0]; }
 
   /* ---------- one fight ---------- */
   function oneFight(fighters, positions, rng, wantLog, maxRounds, gov) {
     var GOV = gov || 1;
     var ents = fighters.map(function (f, i) { return makeEntity(f, i < 4 ? 0 : 1, i, positions[i]); });
     var log = [], turns = 0, MAXT = 2400, capped = false, events = null;
+    var me = null;
+    /* grid items: a cell-bound status with a MoveNear hook (a Burn cell), living on its creator's rounds */
+    var gridFx = [];
+    function fxAt(x, y) { return gridFx.filter(function (f) { return f.x === x && f.y === y; }); }
+    function fxLabel(f) { return f.meta.ele && f.meta.ele !== "None" ? f.meta.ele.toUpperCase() : f.tag; }
+    function fireGrid(f, unit) {
+      var mn = f.meta.moveNear; if (!mn || !unit || !unit.alive) return;
+      var creator = ents[f.creator];
+      if (mn.target === "Enemy" && unit.side === creator.side) return;
+      if ((mn.target === "Friend" || mn.target === "FriendNotMe") && unit.side !== creator.side) return;
+      if (mn.maxCount > 0 && f.fired >= mn.maxCount) return;
+      if (rng() >= mn.rate) return;
+      f.fired++;
+      (mn.skills || []).forEach(function (t) { if (rng() < t.chance) fireSkill(t.skill, creator, unit, f.tag, f.rank, f.level); });
+    }
+    function placeGrid(x, y, ids, creator, rank, level, tag) {
+      if (!inGrid(x, y)) return;
+      ids.forEach(function (sid) {
+        var meta = DATA.statuses[String(sid)]; if (!meta || !meta.moveNear) return;
+        var f = { x: x, y: y, id: sid, meta: meta, creator: creator.i, dur: meta.dur, rank: rank, level: level, tag: tag, fired: 0 };
+        gridFx.push(f);
+        if (events) events.push({ kind: "grid", x: x, y: y, tag: tag, label: fxLabel(f) });
+        if (meta.moveNear.onStart) { var u = unitAt()[x + "," + y]; if (u) fireGrid(f, u); }   /* TryAtStart: whoever stands there now */
+      });
+    }
     function alive(side) { return ents.filter(function (u) { return u.alive && (side === undefined || u.side === side); }); }
     function enemiesOf(u) { return alive(1 - u.side); }
     function alliesOf(u) { return alive(u.side); }
+    function unitAt() { var m = {}; ents.forEach(function (u) { m[u.pos.x + "," + u.pos.y] = u; }); return m; }
+    function standable(x, y, occ, mover) { if (!inGrid(x, y)) return false; var u = occ[x + "," + y]; return !u || u === mover; }
+    function nearestStandable(cx, cy, occ, mover) {
+      for (var i = 0; i < RINGS.length; i++) { var x = cx + RINGS[i][0], y = cy + RINGS[i][1]; if (standable(x, y, occ, mover)) return { x: x, y: y }; }
+      return null;
+    }
+    function nearest(u, list) {
+      var best = null, bd = 1e9;
+      list.forEach(function (v) { var d = dist(u.pos, v.pos); if (d < bd) { bd = d; best = v; } });
+      return best;
+    }
+    function isAlly(sk) { var t = (sk.ec || {}).target; return t === "Me" || t === "Friend" || t === "FriendNotMe" || t === "Ally" || t === "Self"; }
+    function poolFor(u, sk) {
+      var ec = sk.ec || {}, t = ec.target;
+      if (t === "None") return [];
+      if (t === "All") return alive();
+      var pool = isAlly(sk) ? alliesOf(u) : enemiesOf(u);
+      if (t === "FriendNotMe") pool = pool.filter(function (v) { return v !== u; });
+      return pool;
+    }
 
-    function applyStatus(tgt, sid, creator, rank, level, lent) {
+    /* ---- statuses ---- */
+    function applyStatus(tgt, sid, creator, rank, level, lent, quiet) {
       var meta = DATA.statuses[String(sid)];
       if (!meta || meta.falloff || meta.dur === 0) return null;
-      var have = tgt.st.filter(function (x) { return x.id === sid; })[0];
+      var have = tgt.st.filter(function (x) { return x.id === sid; })[0], st;
       if (have) {
         if (meta.stack) have.stacks = Math.min(have.stacks + 1, meta.maxStack > 0 ? meta.maxStack : 99);
-        have.dur = meta.dur; have.rank = rank; have.level = level;
-        return have;
+        have.dur = meta.dur; have.rank = rank; have.level = level; have.skills = meta.skillCount || 0;
+        st = have;
+      } else {
+        st = { id: sid, meta: meta, dur: meta.dur, creator: creator.i, rank: rank, level: level, stacks: 1, props: lent || null, skills: meta.skillCount || 0 };
+        tgt.st.push(st);
       }
-      var st = { id: sid, meta: meta, dur: meta.dur, creator: creator.i, rank: rank, level: level, stacks: 1, props: lent || null };
-      tgt.st.push(st);
+      if (!quiet) onStatusApplied(creator, tgt, st);
       return st;
     }
     function removeStatus(holder, st) {
       var i = holder.st.indexOf(st);
       if (i >= 0) holder.st.splice(i, 1);
-      if (st.meta.shield && !holder.st.some(function (x) { return x.meta.shield; })) holder.shield = 0;
+      if (st.meta.shield && !holder.st.some(function (x) { return x.meta.shield; })) { holder.shield = 0; onShieldGone(holder); }
     }
-    function kill(u) {
+    function hasShield(u) { return u.shield > 0 && u.st.some(function (x) { return x.meta.shield; }); }
+    function kill(u, by) {
       if (u.hp > 0 || !u.alive) return;
+      var overflow = -u.hp;
       u.alive = false; u.hp = 0; u.st = []; u.shield = 0;
+      gridFx = gridFx.filter(function (f) { return !(f.creator === u.i && f.meta.removeAtRoundTargetDie); });   /* StatusAutoRemove: RemoveAtRoundTargetDie */
       if (events) events.push({ kind: "down", who: u.i });
+      if (by) onKill(by, u, overflow);
+      onDeath(u);
+    }
+    function heal(tgt, amount, tag) {
+      if (!tgt.alive || !(amount > 0)) return 0;
+      var before = tgt.hp; tgt.hp = Math.min(tgt.s.hp, tgt.hp + amount);
+      if (events && tgt.hp > before) events.push({ kind: "heal", who: tgt.i, amount: tgt.hp - before, tag: tag });
+      hpUnitsSettle(tgt);
+      return tgt.hp - before;
+    }
+    function directDamage(tgt, amount, by, tag, ignoreShield) {
+      if (!tgt.alive || !(amount > 0)) return 0;
+      var d = amount, absorbed = 0;
+      if (tgt.shield > 0 && !ignoreShield) { absorbed = Math.min(tgt.shield, d); tgt.shield -= absorbed; d -= absorbed; if (tgt.shield <= 0) tgt.st.filter(function (x) { return x.meta.shield; }).forEach(function (x) { removeStatus(tgt, x); }); }
+      var saved = null;
+      if (d > 0 && d >= tgt.hp) { saved = deathSave(tgt); if (saved) d = Math.max(0, tgt.hp - saved.limit); }
+      tgt.hp -= d;
+      if (events && d > 0) events.push({ kind: "dmg", who: tgt.i, amount: d, tag: tag });
+      if (saved) { if (saved.heal > 0) heal(tgt, saved.heal, saved.ch.name); firePassive(saved.pv, saved.ch, tgt, by, by); }
+      else if (d > 0) afterDamage(tgt, by);
+      kill(tgt, by);
+      return d;
     }
 
-    /* a trigger skill (poison tick, expiry heal, charm proc) from src onto tgt */
+    /* ---- trigger skills (poison ticks, expiry heals, Charm procs) ---- */
     function fireSkill(skillId, src, tgt, tag, rank, level) {
       var entry = DATA.trig[String(skillId)];
       if (!entry || !tgt || !tgt.alive) return;
       var rows = (entry.r || {})[String(rank)] || {};
       var srcE = eff(src, ents), tgtE = eff(tgt, ents);
-      var fake = { id: skillId, name: entry.name, ele: (entry.ec && entry.ec.ele) || "None", ec: entry.ec, hits: 1, r: entry.r || {}, pvp: entry.pvp || 10000 };
+      var fake = { id: skillId, name: entry.name, ele: (entry.ec && entry.ec.ele) || "None", ec: entry.ec, hits: 1, r: entry.r || {}, pvp: entry.pvp || 10000, gov: entry.gov !== false,
+                   noHooks: !!(entry.ec && entry.ec.canTriggerChild === false) };
       var parts = hitParts(srcE, tgtE, fake, rows, level);
-      if (parts.heal) {
-        var before = tgt.hp;
-        tgt.hp = Math.min(tgt.s.hp, tgt.hp + parts.heal * GOV);
-        if (events) events.push({ kind: "heal", who: tgt.i, amount: tgt.hp - before, tag: tag });
-        return;
-      }
-      var total = landHits(parts, src, tgt, srcE, tgtE, fake, null, rank, level);
+      if (parts.heal) { heal(tgt, parts.heal, tag); return; }
+      var total = landHits(parts, src, tgt, srcE, tgtE, fake, null, rank, level, null);
       if (events && total > 0) events.push({ kind: "dmg", who: tgt.i, amount: total, tag: tag });
       parts.hits.forEach(function (h) {
         h.on.forEach(function (o) {
@@ -364,27 +506,41 @@
           var target = (o.target === "DamageTarget") ? tgt : src;
           if (rng() < landChance(o.chance, o.byProp, meta.type, srcE, tgtE)) {
             var st = applyStatus(target, o.status, src, rank, level);
-            if (st && meta.shield) { var amt = shieldSize(meta, src, target, rank, level) * GOV; if (amt > 0) target.shield = Math.max(target.shield, amt); }
+            if (st && meta.shield) { var amt = shieldSize(meta, src, target, rank, level); if (amt > 0) target.shield = Math.max(target.shield, amt); }
             if (st && events) events.push({ kind: "status", who: target.i, name: statusName(meta) });
           }
         });
       });
-      kill(tgt);
+      forcedMoves(parts, fake, src, tgt, tgt.pos, facing(src.pos, tgt.pos), src.flip);
+      kill(tgt, src);
+    }
+    /* a trigger skill with an area: every unit of the right side under its cells around `centre` */
+    function fireSkillArea(skillId, src, centre, tag, rank, level, customDamage) {
+      var entry = DATA.trig[String(skillId)];
+      if (!entry || !entry.ec) return;
+      var fake = { ec: entry.ec, id: skillId };
+      var pool = poolFor(src, fake);
+      var cellsHit = {};
+      (entry.ec.hits || []).forEach(function (h) { (h.cells && h.cells.length ? h.cells : [[0, 0]]).forEach(function (c) { var w = turn(c, "U", false); cellsHit[(centre.x + w[0]) + "," + (centre.y + w[1])] = 1; }); });
+      pool.forEach(function (u) {
+        if (!cellsHit[u.pos.x + "," + u.pos.y]) return;
+        if (customDamage !== undefined) directDamage(u, customDamage, src, tag, false);
+        else fireSkill(skillId, src, u, tag, rank, level);
+      });
     }
     function charmStrike(ch, holder, tgt) {
       var hE = eff(holder, ents), tE = eff(tgt, ents);
       var rows = (ch.sk.r || {})[String(ch.rank)] || {};
-      var fake = { id: ch.id, name: ch.name, ele: ch.sk.ele || "Physical", hits: 1, r: ch.sk.r || {}, pvp: ch.sk.pvp || 10000 };
+      var fake = { id: ch.id, name: ch.name, ele: ch.sk.ele || "Physical", hits: 1, r: ch.sk.r || {}, pvp: ch.sk.pvp || 10000, gov: ch.sk.gov !== false };
       var parts = hitParts(hE, tE, fake, rows, ch.level);
-      if (parts.heal) {
-        var before = holder.hp; holder.hp = Math.min(holder.s.hp, holder.hp + parts.heal * GOV);
-        if (events) events.push({ kind: "heal", who: holder.i, amount: holder.hp - before, tag: ch.name });
-        return;
-      }
-      var total = landHits(parts, holder, tgt, hE, tE, fake, null, ch.rank, ch.level);
+      if (parts.heal) { heal(holder, parts.heal, ch.name); return; }
+      var total = landHits(parts, holder, tgt, hE, tE, fake, null, ch.rank, ch.level, null);
       if (events && total > 0) events.push({ kind: "dmg", who: tgt.i, amount: total, tag: ch.name });
-      kill(tgt);
+      kill(tgt, holder);
     }
+    function charmRow(ch, holder) { return (ch.sk.props || {})[String(ch.rank)] || null; }
+    function charmVal(ch, holder, prop) { var row = charmRow(ch, holder); return row && row[prop] ? curveValue(row[prop], ch.rank, ch.level, holder.s.rank.name) : 0; }
+
     function firePassive(pv, ch, holder, enemy, trig) {
       var key = ch.id + ":" + pv.kind + ":" + pv.status;
       if (pv.maxCount > 0 && (holder.charmFired[key] || 0) >= pv.maxCount) return false;
@@ -399,13 +555,15 @@
       });
       (pv.statuses || []).forEach(function (o) {
         var meta = DATA.statuses[String(o.status)]; if (!meta) return;
-        if (rng() >= pv.rate * (o.chance === undefined ? 1 : o.chance)) return;
+        var chance = pv.rate * (o.chance === undefined ? 1 : o.chance);
         var tgt = pick(o.target);
         if (!tgt || !tgt.alive) return;
+        if (o.byProp) chance = landChance(chance, true, meta.type, eff(holder, ents), eff(tgt, ents));
+        if (rng() >= chance) return;
         var lent = (meta.props || (pv.stackTrigger && pv.stackTrigger.status === o.status)) ? null : (ch.sk.props || null);
         var st = applyStatus(tgt, o.status, holder, ch.rank, ch.level, lent);
         if (!st) return;
-        if (meta.shield) { var amt = shieldSize(meta, holder, tgt, ch.rank, ch.level) * GOV; if (amt > 0) tgt.shield = Math.max(tgt.shield, amt); }
+        if (meta.shield) { var amt = shieldSize(meta, holder, tgt, ch.rank, ch.level); if (amt > 0) tgt.shield = Math.max(tgt.shield, amt); }
         if (events) events.push({ kind: "status", who: tgt.i, name: statusName(meta, lent) + (st.stacks > 1 ? " ×" + st.stacks : ""), tag: ch.name });
         if (pv.stackTrigger && pv.stackTrigger.status === o.status && st.stacks >= pv.stackTrigger.count) {
           st.stacks -= pv.stackTrigger.count;
@@ -415,67 +573,210 @@
       });
       return true;
     }
-    function procs(holder, kind, enemy, trig, filter) {
+    function eachPassive(holder, fn) {
       if (!holder.alive) return;
-      holder.charms.forEach(function (ch) {
-        (ch && ch.sk.passive || []).forEach(function (pv) {
-          if (pv.kind !== kind) return;
-          if (filter && !filter(pv)) return;
-          firePassive(pv, ch, holder, enemy, trig);
-        });
+      holder.charms.forEach(function (ch) { (ch && ch.sk.passive || []).forEach(function (pv) { fn(pv, ch); }); });
+    }
+    function procs(holder, kind, enemy, trig, filter) {
+      eachPassive(holder, function (pv, ch) {
+        if (pv.kind !== kind) return;
+        if (filter && !filter(pv)) return;
+        firePassive(pv, ch, holder, enemy, trig);
       });
     }
     function deathSave(who) {
       var out = null;
-      who.charms.forEach(function (ch) {
-        (ch && ch.sk.passive || []).forEach(function (pv) {
-          if (out || pv.kind !== "deathSave") return;
-          var key = ch.id + ":saved:" + pv.status;
-          if ((who.charmFired[key] || 0) >= (pv.maxCount > 0 ? pv.maxCount : 1)) return;
-          who.charmFired[key] = (who.charmFired[key] || 0) + 1;
-          out = { limit: pv.limit || 1, ch: ch, pv: pv, heal: 0 };
-          var row = ch.sk.props && ch.sk.props[String(ch.rank)];
-          if (row) {
-            if (row.SkillCureByHp) out.heal += curveValue(row.SkillCureByHp, ch.rank, ch.level, who.s.rank.name) / 100 * who.s.hp;
-            if (row.SkillFixedCure) out.heal += curveValue(row.SkillFixedCure, ch.rank, ch.level, who.s.rank.name);
-            out.heal *= GOV;
-          }
-        });
+      eachPassive(who, function (pv, ch) {
+        if (out || pv.kind !== "deathSave") return;
+        var key = ch.id + ":saved:" + pv.status;
+        if ((who.charmFired[key] || 0) >= (pv.maxCount > 0 ? pv.maxCount : 1)) return;
+        who.charmFired[key] = (who.charmFired[key] || 0) + 1;
+        out = { limit: pv.limit || 1, ch: ch, pv: pv, heal: 0 };
+        var row = charmRow(ch, who);
+        if (row) {
+          if (row.SkillCureByHp) out.heal += curveValue(row.SkillCureByHp, ch.rank, ch.level, who.s.rank.name) / 100 * who.s.hp;
+          if (row.SkillFixedCure) out.heal += curveValue(row.SkillFixedCure, ch.rank, ch.level, who.s.rank.name);
+        }
       });
       return out;
     }
+    /* HP-unit Charms: one stack per UnitHpPer of max HP missing; stacks come off as HP climbs back (HpIncreaseUnit) */
+    function hpUnitsSettle(who) {
+      eachPassive(who, function (pv, ch) {
+        if (pv.kind !== "hpUnit") return;
+        var key = ch.id + ":units:" + pv.status;
+        var units = Math.floor((1 - who.hp / who.s.hp) / pv.unit + 1e-9);
+        if (pv.maxCount > 0) units = Math.min(units, pv.maxCount);
+        if ((who.charmFired[key] || 0) > units) {
+          who.charmFired[key] = units;
+          (pv.statuses || []).forEach(function (o) {
+            var st = who.st.filter(function (x) { return x.id === o.status; })[0];
+            if (st && st.stacks > units) { st.stacks = units; if (st.stacks <= 0) removeStatus(who, st); }
+          });
+        }
+      });
+    }
     function afterDamage(who, from) {
-      who.charms.forEach(function (ch) {
-        (ch && ch.sk.passive || []).forEach(function (pv) {
-          if (pv.kind === "hpUnit") {
-            var key = ch.id + ":units:" + pv.status;
-            var units = Math.floor((1 - who.hp / who.s.hp) / pv.unit + 1e-9);
-            if (pv.maxCount > 0) units = Math.min(units, pv.maxCount);
-            while ((who.charmFired[key] || 0) < units) {
-              who.charmFired[key] = (who.charmFired[key] || 0) + 1;
-              firePassive(pv, ch, who, from, from);
-            }
-          } else if (pv.kind === "hpBelow") {
-            var k2 = ch.id + ":below:" + pv.status;
-            if (who.hp < pv.pct * who.s.hp) {
-              if (!who.charmFired[k2]) { who.charmFired[k2] = 1; firePassive(pv, ch, who, from, from); }
-            } else who.charmFired[k2] = 0;
+      eachPassive(who, function (pv, ch) {
+        if (pv.kind === "hpUnit") {
+          var key = ch.id + ":units:" + pv.status;
+          var units = Math.floor((1 - who.hp / who.s.hp) / pv.unit + 1e-9);
+          if (pv.maxCount > 0) units = Math.min(units, pv.maxCount);
+          while ((who.charmFired[key] || 0) < units) {
+            who.charmFired[key] = (who.charmFired[key] || 0) + 1;
+            firePassive(pv, ch, who, from, from);
           }
+        } else if (pv.kind === "hpBelow") {
+          var k2 = ch.id + ":below:" + pv.status;
+          if (who.hp < pv.pct * who.s.hp) {
+            if (!who.charmFired[k2]) { who.charmFired[k2] = 1; firePassive(pv, ch, who, from, from); }
+          } else who.charmFired[k2] = 0;
+        }
+      });
+    }
+    /* hooks for the Charm components that watch other events */
+    var applying = 0;
+    function onStatusApplied(creator, tgt, st) {
+      if (applying > 0 || !creator || !creator.alive) return;
+      eachPassive(creator, function (pv, ch) {
+        if (pv.kind !== "statusApplied") return;
+        if (pv.when && st.meta.action !== pv.when) return;
+        applying++;
+        (pv.statuses || []).forEach(function (o) {
+          var chance = o.chance === undefined ? 1 : o.chance;
+          if (o.byProp) chance = landChance(chance, true, (DATA.statuses[String(o.status)] || {}).type, eff(creator, ents), eff(tgt, ents));
+          if (rng() < chance) { var s2 = applyStatus(tgt, o.status, creator, ch.rank, ch.level, null, true); if (s2 && events) events.push({ kind: "status", who: tgt.i, name: statusName(s2.meta), tag: ch.name }); }
+        });
+        applying--;
+      });
+    }
+    function onShieldGone(holder) {
+      eachPassive(holder, function (pv, ch) {
+        if (pv.kind !== "actionEnd" || (pv.actions || []).indexOf("Shield") < 0) return;
+        if (rng() >= pv.rate) return;
+        (pv.triggers || []).forEach(function (t) { fireSkillArea(t.skill, holder, holder.pos, ch.name, ch.rank, ch.level); });
+      });
+    }
+    function onKill(by, victim, overflow) {
+      eachPassive(by, function (pv, ch) {
+        if (pv.kind !== "kill") return;
+        var key = ch.id + ":kill:" + pv.status;
+        if (pv.maxCount > 0 && (by.charmFired[key] || 0) >= pv.maxCount) return;
+        if (rng() >= pv.rate) return;
+        by.charmFired[key] = (by.charmFired[key] || 0) + 1;
+        var pct = charmVal(ch, by, "DamageByDamage") / 100;
+        (pv.triggers || []).forEach(function (t) {
+          var dmg = pv.overflow ? overflow * pct : undefined;
+          if (dmg !== undefined && !(dmg > 0)) return;
+          fireSkillArea(t.skill, by, pv.atDiePos ? victim.pos : by.pos, ch.name, ch.rank, ch.level, dmg);
         });
       });
     }
+    function onDeath(u) {
+      /* Resurrection: an ally's death (or its own) revives the fallen at 1 HP, once per battle per wearer */
+      ents.forEach(function (w) {
+        if (!w.alive && w !== u) return;
+        if (w.side !== u.side) return;
+        eachPassive(w, function (pv, ch) {
+          if (pv.kind !== "revive" || u.alive) return;
+          var key = ch.id + ":revive:" + pv.status;
+          if (pv.maxCount > 0 && (w.charmFired[key] || 0) >= pv.maxCount) return;
+          w.charmFired[key] = (w.charmFired[key] || 0) + 1;
+          u.alive = true; u.hp = 1; u.st = []; u.shield = 0;
+          if (events) events.push({ kind: "status", who: u.i, name: "Revived", tag: ch.name });
+          (pv.triggers || []).forEach(function (t) {
+            var entry = DATA.trig[String(t.skill)];
+            if (!entry) return;
+            var isCure = entry.ec && entry.ec.skillType === "Cure";
+            if (isCure) fireSkill(t.skill, w, u, ch.name, ch.rank, ch.level);
+            else (entry.ec && entry.ec.hits || []).forEach(function (h) { h.on.forEach(function (o) { var meta = DATA.statuses[String(o.status)]; if (meta && meta.action !== "BackToLife") applyStatus(u, o.status, w, ch.rank, ch.level); }); });
+          });
+        });
+      });
+    }
+    function afterMoved(mover, from) {
+      /* Repelling Wind: an enemy stepping from outside to inside the wearer's zone triggers its strike */
+      ents.forEach(function (w) {
+        if (!w.alive || w === mover || w.side === mover.side) return;
+        eachPassive(w, function (pv, ch) {
+          if (pv.kind !== "proximity" || !pv.onEnter) return;
+          var inside = pv.cells.some(function (c) { return w.pos.x + c[0] === mover.pos.x && w.pos.y + c[1] === mover.pos.y; });
+          var was = pv.cells.some(function (c) { return w.pos.x + c[0] === from.x && w.pos.y + c[1] === from.y; });
+          if (!inside || was) return;
+          if (rng() >= pv.rate) return;
+          (pv.triggers || []).forEach(function (t) { fireSkill(t.skill, w, mover, ch.name, ch.rank, ch.level); });
+        });
+      });
+      /* grid items: arriving on one from another cell sets it off (TryAtEnterRange) */
+      fxAt(mover.pos.x, mover.pos.y).forEach(function (f) { if (f.meta.moveNear.onEnter && !(from.x === f.x && from.y === f.y)) fireGrid(f, mover); });
+    }
+    /* forced moves: the caster's SourceMoveList and the victim's damage MoveCfg (FightSKillMoveCfg) */
+    function forceMove(mover, cfg, caster, aim, dir, flip, who) {
+      if (!mover.alive) return 0;
+      if (mover !== caster && mover.st.some(function (x) { return x.meta.action === "Frozen" || x.meta.action === "Immobilize" || x.meta.action === "SuperArmor"; })) return 0;
+      var occ = unitAt();
+      var o = turn(cfg.offset || [0, 0], dir, flip);
+      var base = cfg.dir === "RelativeToSource" ? caster.pos : aim;
+      var anchor = { x: base.x + o[0], y: base.y + o[1] };
+      var from = { x: mover.pos.x, y: mover.pos.y }, dest = null;
+      if (cfg.distance === -1) {
+        dest = nearestStandable(anchor.x, anchor.y, occ, mover);
+      } else if (cfg.distance > 0) {
+        var step = dirVec(cfg.towards ? facing(mover.pos, anchor) : opposite(facing(mover.pos, anchor)));
+        if (cfg.dir === "TowardsPathSides") step = dirVec(facing(anchor, mover.pos));
+        var cx = mover.pos.x, cy = mover.pos.y;
+        for (var k = 0; k < cfg.distance; k++) {
+          if (cfg.towards && cx + step[0] === anchor.x && cy + step[1] === anchor.y) break;
+          if (!standable(cx + step[0], cy + step[1], occ, mover)) break;
+          cx += step[0]; cy += step[1];
+        }
+        dest = { x: cx, y: cy };
+      }
+      if (!dest || (dest.x === from.x && dest.y === from.y)) return 0;
+      mover.pos = dest;
+      if (events) events.push({ kind: "move", who: mover.i, to: [dest.x, dest.y], forced: true, tag: who });
+      afterMoved(mover, from);
+      return dist(from, dest);
+    }
+    function forcedMoves(parts, pick, src, tgt, aim, dir, flip) {
+      (pick.ec && pick.ec.hits || []).forEach(function (h) {
+        if (h.move && !h.child && tgt.alive && rng() < (h.move.chance === undefined ? 1 : h.move.chance)) forceMove(tgt, h.move, src, aim, dir, flip, pick.name);
+      });
+    }
 
-    function landHits(parts, me, foe, meE, foeE, pick, rolled, rank, level) {
+    /* the damage-event hooks (FightStatusDamageBaseComponentInfo / FightStatusHitBaseComponentInfo): every true
+       flag restricts the event — Block = only a blocked hit, Crit = only a crit, Damage = only when damage landed;
+       ConditionCount = every Nth event, EachRoundMaxCount = per round of the wearer */
+    function hitMatch(pv, ev, holder, other) {
+      if (pv.onlyAttack && !ev.isAttack) return false;
+      if (pv.onBlock && !ev.block) return false;
+      if (pv.onCrit && !ev.crit) return false;
+      if (pv.onDamage !== false && !(ev.d + ev.absorbed > 0)) return false;
+      if (pv.onCure) return false;
+      if (pv.elements && pv.elements.length && pv.elements.indexOf(ev.ele) < 0) return false;
+      if (pv.ignoreSkills && pv.ignoreSkills.length && pv.ignoreSkills.indexOf(ev.skillId) >= 0) return false;
+      if (pv.onlySkills && pv.onlySkills.length && pv.onlySkills.indexOf(ev.skillId) < 0) return false;
+      if (pv.skillTargetType === "Enemy" && holder.side === other.side) return false;
+      if (pv.conditionCount > 1) { var ck = "cc:" + pv.status; holder.charmFired[ck] = (holder.charmFired[ck] || 0) + 1; if (holder.charmFired[ck] % pv.conditionCount !== 0) return false; }
+      if (pv.eachRoundMax > 0) { var rk = "rm:" + pv.status, cur = holder.charmFired[rk]; if (!cur || cur.turn !== holder.turns) cur = holder.charmFired[rk] = { turn: holder.turns, n: 0 }; if (cur.n >= pv.eachRoundMax) return false; cur.n++; }
+      return true;
+    }
+    var hookDepth = 0;
+    function landHits(parts, me, foe, meE, foeE, pick, rolled, rank, level, fall) {
       var p = critChance(meE, foeE), m = critMult(meE, foeE);
-      var b = blockChance(meE, foeE), bd = blockDiv(foeE);
-      var total = 0, fallCount = 0;
+      var b = blockChance(meE, foeE), bd = blockDiv(meE, foeE);
+      var total = 0, fallCount = fall ? (fall[foe.i] || 0) : 0;
       var blind = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
+      var gov = pick.gov === false ? 1 : GOV;
+      var shielded = hasShield(foe);
+      var isAttack = !pick.ec || !pick.ec.skillType || pick.ec.skillType === "Attack";
       parts.hits.forEach(function (h, hi) {
-        if (!foe.alive || !(h.d > 0)) return;   /* a status-only hit has nothing to roll */
-        var d = h.d * GOV, crit = false, block = false, absorbed = 0, blinded = false;
+        if (!foe.alive || !(h.d > 0)) return;
+        var d = h.d * gov, crit = false, block = false, absorbed = 0, blinded = false;
         var fo = null;
         h.on.forEach(function (o) { var mt = DATA.statuses[String(o.status)]; if (mt && mt.falloff) fo = mt.falloff; });
         if (fo) {
+          /* FightStatusDamageFalloffComponent: damage x (1 - per)^n, n = earlier hits of this root skill on this target */
           var steps = Math.max(0, fallCount - (fo.start - 1));
           if (fo.max > 0) steps = Math.min(steps, fo.max);
           d *= Math.pow(1 - fo.pct, steps);
@@ -494,120 +795,140 @@
         if (rolled) rolled.push({ d: d, crit: crit, block: block, absorbed: absorbed, blinded: blinded, at: h.at || 0, saved: !!saved, who: foe.i, hi: hi });
         if (saved) {
           if (events) events.push({ kind: "save", who: foe.i, tag: saved.ch.name });
-          if (saved.heal > 0) {
-            var b0 = foe.hp; foe.hp = Math.min(foe.s.hp, foe.hp + saved.heal);
-            if (events) events.push({ kind: "heal", who: foe.i, amount: foe.hp - b0, tag: saved.ch.name });
-          }
+          if (saved.heal > 0) heal(foe, saved.heal, saved.ch.name);
           firePassive(saved.pv, saved.ch, foe, me, me);
         } else if (d > 0) afterDamage(foe, me);
+        if (pick.noHooks || hookDepth >= 4) return;      /* the skill's CanTriggerChild is off, or a hook chain runs too deep */
+        hookDepth++;
+        var ev = { d: d, absorbed: absorbed, block: block, crit: crit, blinded: blinded, ele: pick.ele || "None", skillId: pick.id, isAttack: isAttack };
+        /* the attacker's on-hit Charms (Radiant Sear, Blade of Judgment, Shadow Erosion, ...) */
+        if (me.alive) procs(me, "hit", foe, foe, function (pv) { return hitMatch(pv, ev, me, foe); });
+        /* the victim's on-damaged Charms (Rebound on a block, Counter Blade, Eye for an Eye, ...) */
+        if (foe.hp > 0) procs(foe, "damaged", me, me, function (pv) { return hitMatch(pv, ev, foe, me); });
+        if (d > 0 && me.alive) eachPassive(me, function (pv, ch) {        /* Blade of Lament: lifesteal on damaging hits */
+          if (pv.kind !== "lifesteal" || (pv.onlyAttack && !isAttack)) return;
+          var pct = (charmVal(ch, me, "SuckHpByDamage") + charmVal(ch, me, "FixedSuckHp")) / 100;
+          if (pct > 0) heal(me, d * pct, ch.name);
+        });
+        /* Reflective Armor: a shielded target strikes back with a share of the hit, shield-absorbed part included */
+        if ((d + absorbed) > 0 && me.alive) eachPassive(foe, function (pv, ch) {
+          if (pv.kind !== "reflect" || (pv.needShield && !shielded) || rng() >= pv.rate) return;
+          var pct = charmVal(ch, foe, "DamageByDamage") / 100;
+          if (pct > 0) directDamage(me, (d + absorbed) * pct, foe, ch.name, false);
+        });
+        hookDepth--;
       });
+      if (fall) fall[foe.i] = fallCount;
       return total;
     }
-    function tickEnd(me) {
-      me.st.slice().forEach(function (st) {
+    function tickEnd(u) {
+      u.st.slice().forEach(function (st) {
         if (st.dur > 0) {
           st.dur--;
           if (st.dur === 0) {
             (st.meta.onEnd || []).forEach(function (t) {
-              var src = t.source === "Creator" ? ents[st.creator] : me;
-              var tgt = t.target === "Creator" ? ents[st.creator] : me;
+              var src = t.source === "Creator" ? ents[st.creator] : u;
+              var tgt = t.target === "Creator" ? ents[st.creator] : u;
               if (rng() < (t.byProp ? landChance(t.chance, true, null, eff(src, ents), eff(tgt, ents)) : t.chance))
                 fireSkill(t.skill, src, tgt, statusName(st.meta, st.props) + " ends", st.rank, st.level);
             });
-            removeStatus(me, st);
+            removeStatus(u, st);
           }
         }
       });
+      /* grid items count on their creator's rounds (RoundTarget Creator, RoundUpdateTiming End) */
+      gridFx = gridFx.filter(function (f) { if (f.creator !== u.i) return true; if (f.dur > 0) f.dur--; return f.dur !== 0; });
+    }
+    /* statuses that last N of the holder's skill casts (DurationSkillCount) */
+    function spendSkillStatuses(u, isAttack) {
+      u.st.slice().forEach(function (st) {
+        if (!(st.skills > 0)) return;
+        if (st.meta.onlyAttack && !isAttack) return;
+        st.skills--;
+        if (st.skills <= 0) removeStatus(u, st);
+      });
     }
 
-    /* ---------- the spatial layer ----------
-       Skill.range: offsets from the caster where the aim point may go (prefab, near to far).
-       Hit.cells: offsets from the hit centre (the aim point, or the caster's cell when onSource),
-       authored facing Up and turned to face the aim (Pos2d.LookDirection + CalcLocalToWorldDir). */
-    function facing(from, to) {
-      var dx = to.x - from.x, dy = to.y - from.y;
-      if (!dx && !dy) return "U";
-      return Math.abs(dy) >= Math.abs(dx) ? (dy > 0 ? "U" : "D") : (dx > 0 ? "R" : "L");
-    }
-    function turn(c, dir, flip) {
-      var x = flip ? -c[0] : c[0], y = c[1];
-      if (dir === "U") return [x, y];
-      if (dir === "D") return [-x, -y];
-      if (dir === "L") return [-y, x];
-      return [y, -x];
-    }
-    function unitAt() { var m = {}; ents.forEach(function (u) { m[u.pos.x + "," + u.pos.y] = u; }); return m; }
-    function isAlly(sk) { var t = (sk.ec || {}).target; return t === "Me" || t === "Friend" || t === "FriendNotMe" || t === "Ally" || t === "Self"; }
-    /* a skill's geometry, precomputed: for every aim offset r (and, for a self-centred aim, every facing) the
-       cells each hit covers, all relative to the caster, plus an index from "unit offset" to the aims covering it */
+    /* ---- geometry per skill: for every aim offset the cells each hit covers, relative to the caster ---- */
     function geo(sk) {
       if (sk._geo) return sk._geo;
       var ec = sk.ec || {};
       var range = (ec.range && ec.range.length) ? ec.range : [[0, 0]];
       var hits = (ec.hits && ec.hits.length) ? ec.hits : [{ cells: [[0, 0]], onSource: false }];
       var entries = [], byOff = {};
-      function add(r, dir, flip, selfAim) {
-        var perHit = [], all = {};
-        hits.forEach(function (h) {
+      function add(r, dir, flip, flipDep) {
+        var perHit = [], all = {}, groups = {};
+        hits.forEach(function (h, hi) {
+          if (h.child) { perHit.push(null); return; }
+          if (h.rnd) {
+            var g = groups[h.rnd.g];
+            if (!g) {
+              g = groups[h.rnd.g] = { pool: [], subs: [], cfg: h.rnd };
+              (h.rnd.cells || [[0, 0]]).forEach(function (c) { var w = turn(c, dir, flip); var ox = (h.rnd.onSource ? 0 : r[0]) + w[0], oy = (h.rnd.onSource ? 0 : r[1]) + w[1]; g.pool.push([ox, oy]); all[ox + "," + oy] = 1; });
+            }
+            var subCells = (h.cells && h.cells.length ? h.cells : [[0, 0]]).map(function (c) { return turn(c, dir, flip); });
+            var pk = h.pick || 0;
+            g.subs.push({ hi: hi, cells: subCells, pick: pk });
+            g.n = Math.max(g.n || 0, pk + 1);
+            perHit.push({ rnd: h.rnd.g });
+            return;
+          }
           var set = {};
           (h.cells && h.cells.length ? h.cells : [[0, 0]]).forEach(function (c) {
             var w = turn(c, dir, flip);
             var ox = (h.onSource ? 0 : r[0]) + w[0], oy = (h.onSource ? 0 : r[1]) + w[1];
             set[ox + "," + oy] = 1; all[ox + "," + oy] = 1;
           });
-          perHit.push(set);
+          perHit.push({ set: set });
         });
         var ei = entries.length;
-        entries.push({ r: r, dir: dir, flip: flip, selfAim: selfAim, perHit: perHit });
+        entries.push({ r: r, dir: dir, flip: flip, flipDep: flipDep, perHit: perHit, groups: groups });
         Object.keys(all).forEach(function (k) { (byOff[k] = byOff[k] || []).push(ei); });
       }
       range.forEach(function (r) {
-        if (r[0] === 0 && r[1] === 0) ["U", "D", "L", "R"].forEach(function (d) { add(r, d, false, true); });
-        else add(r, facing({ x: 0, y: 0 }, { x: r[0], y: r[1] }), r[0] < 0, false);
+        var dir = facing({ x: 0, y: 0 }, { x: r[0], y: r[1] });
+        if (r[0] === 0) { add(r, dir, false, true); add(r, dir, true, true); }   /* flip follows the caster's current facing */
+        else add(r, dir, r[0] < 0, false);
       });
       sk._geo = { entries: entries, byOff: byOff, hits: hits };
       return sk._geo;
     }
-    /* every (aim, targets) a skill can take from `pos`; the chain picks among them */
+    /* every (aim, targets) a skill can take from `pos` */
     function plans(me, sk, pos, occ) {
       var ec = sk.ec || {};
       var selfish = isAlly(sk);
-      var pool = selfish ? alliesOf(me) : enemiesOf(me);
-      if (ec.target === "FriendNotMe") pool = pool.filter(function (u) { return u !== me; });
+      var pool = poolFor(me, sk);
       if (!pool.length) return [];
       var g = geo(sk);
       var taunt = me.taunt && !selfish ? me.taunt : null;
       var offs = pool.map(function (u) { return (u.pos.x - pos.x) + "," + (u.pos.y - pos.y); });
       var cand = {};
       offs.forEach(function (k) { (g.byOff[k] || []).forEach(function (ei) { cand[ei] = 1; }); });
-      var selfDir = null;
+      var kind = ec.targetKind || "Pos";
       var out = [];
       Object.keys(cand).forEach(function (ei) {
         var e = g.entries[ei];
-        if (e.selfAim) {
-          if (selfDir === null) selfDir = facing(pos, (taunt || nearest(me, pool) || me).pos);
-          if (e.dir !== selfDir) return;
-        }
+        if (e.flipDep && e.flip !== !!me.flip) return;
         var ax = pos.x + e.r[0], ay = pos.y + e.r[1];
         if (ax < 0 || ay < 0 || ax >= GRID.w || ay >= GRID.h) return;
+        var unitHere = occ[ax + "," + ay];
+        if ((kind === "Entity" || kind === "EntityFollow") && !(unitHere && unitHere.alive && pool.indexOf(unitHere) >= 0)) return;
+        if ((kind === "PosCanStand" || kind === "PosSkillDirectionCanStand") && !standable(ax, ay, occ, me)) return;
         var perHit = [], seen = {}, union = [];
+        function take(u) { if (!seen[u.i]) { seen[u.i] = 1; union.push(u); } }
         for (var hi = 0; hi < e.perHit.length; hi++) {
-          var set = e.perHit[hi], list = [];
-          for (var pi = 0; pi < pool.length; pi++) {
-            if (set[offs[pi]]) { var u = pool[pi]; list.push(u); if (!seen[u.i]) { seen[u.i] = 1; union.push(u); } }
-          }
+          var ph = e.perHit[hi], list = [];
+          if (ph && ph.set) for (var pi = 0; pi < pool.length; pi++) if (ph.set[offs[pi]]) { list.push(pool[pi]); take(pool[pi]); }
+          if (ph && ph.rnd) { var grp = e.groups[ph.rnd]; for (var pj = 0; pj < pool.length; pj++) if (grp.pool.some(function (c) { return c[0] + "," + c[1] === offs[pj]; })) take(pool[pj]); }
           perHit.push(list);
         }
         if (!union.length) return;
-        if (taunt && union.indexOf(taunt) < 0) return;          /* under Ridicule every attack goes at the taunter */
-        out.push({ aim: { x: ax, y: ay }, dir: e.dir, perHit: perHit, union: union, onUnit: !!occ[ax + "," + ay],
+        if (taunt && union.indexOf(taunt) < 0) return;
+        out.push({ aim: { x: ax, y: ay }, dir: e.dir, flip: e.flip, entry: e, perHit: perHit, union: union, onUnit: !!unitHere,
                    primary: union.slice().sort(function (x, y) { return x.hp / x.s.hp - y.hp / y.s.hp; })[0] });
       });
       return out;
     }
-    /* AiPriorityType, as the client defines it: a skill's own AiPriorityTypes / LastAIPriorityTypes when it has
-       them; otherwise the chain the designers wrote out on the skills that do carry one (the true default is
-       server-side). DontKeepDistance means the last cast uses the ordinary chain instead of the "last" one. */
     var DEFAULT_CHAIN = ["PriorGameCharacterType", "BiggerBodyRange", "MoreHitStatusCount", "MoreHitCount", "ShorterMoveDist", "LowerTargetHp", "ShorterEnemyTargetPosDistAndSameDir", "PriorTargetEntityPos"];
     var DEFAULT_LAST = ["PriorGameCharacterType", "BiggerBodyRange", "MoreHitStatusCount", "MoreHitCount", "SaferPos", "LowerTargetHp", "ShorterEnemyTargetPosDistAndSameDir", "PriorTargetEntityPos"];
     function chainOf(sk, last) {
@@ -615,8 +936,6 @@
       if (last && !ec.dontKeepDistance) return (ec.aiLast && ec.aiLast.length) ? ec.aiLast : DEFAULT_LAST;
       return (ec.aiPriority && ec.aiPriority.length) ? ec.aiPriority : DEFAULT_CHAIN;
     }
-    /* one criterion, scored "bigger is better" by its name; criteria about body size, character type and
-       MoreHit-flagged statuses are all zero here because every player is one cell and no status carries the flag */
     function scoreOf(chain, me, cell, pl) {
       var enemies = enemiesOf(me), v = [];
       for (var i = 0; i < chain.length; i++) {
@@ -633,16 +952,15 @@
       }
       return v;
     }
+    function better(a, b) { for (var i = 0; i < a.length; i++) { if (a[i] > b[i]) return true; if (a[i] < b[i]) return false; } return false; }
     function plan(me, sk, pos, occ, last) {
       var all = plans(me, sk, pos, occ), chain = chainOf(sk, last), best = null, cell = { x: pos.x, y: pos.y, d: 0 };
       all.forEach(function (pl) { var sc = scoreOf(chain, me, cell, pl); if (!best || better(sc, best.score)) { best = pl; best.score = sc; } });
       return best;
     }
-    function better(a, b) { for (var i = 0; i < a.length; i++) { if (a[i] > b[i]) return true; if (a[i] < b[i]) return false; } return false; }
-    /* every cell reachable in up to `steps` 4-way moves through free cells; living and fallen bodies block */
-    function reachable(me, steps) {
-      var occ = unitAt(), out = {}, key = me.pos.x + "," + me.pos.y;
-      out[key] = { x: me.pos.x, y: me.pos.y, d: 0, from: null };
+    function reachable(u, steps) {
+      var occ = unitAt(), out = {}, key = u.pos.x + "," + u.pos.y;
+      out[key] = { x: u.pos.x, y: u.pos.y, d: 0, from: null };
       var frontier = [out[key]];
       while (frontier.length) {
         var c = frontier.shift();
@@ -650,135 +968,236 @@
         [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) {
           var nx = c.x + d[0], ny = c.y + d[1], k = nx + "," + ny;
           if (!inGrid(nx, ny) || out[k]) return;
-          var u = occ[k];
-          if (u && u !== me) return;                    /* players and their corpses both block (DestroyOnDie = false) */
+          var v = occ[k];
+          if (v && v !== u) return;
           out[k] = { x: nx, y: ny, d: c.d + 1, from: c };
           frontier.push(out[k]);
         });
       }
       return out;
     }
-    /* the offsets, relative to the caster, at which some aim of `sk` covers a unit (its footprint) */
-    function footprint(sk) { return geo(sk).byOff; }
-    /* the AI's joint choice of where to stand and what to aim at, over every cell in walking reach
-       (SkillAiCfg.IsReleaseSkillAfterMove); candidates are pruned by how many units their footprint can cover */
-    function planWithMove(me, sk, reach, occ, last) {
-      var chain = chainOf(sk, last), selfish = isAlly(sk);
-      var pool = selfish ? alliesOf(me) : enemiesOf(me);
+    function planWithMove(u, sk, reach, occ, last) {
+      var chain = chainOf(sk, last);
+      var pool = poolFor(u, sk);
       if (!pool.length) return null;
-      var fp = footprint(sk);
+      var fp = geo(sk).byOff;
       var cells = Object.keys(reach).map(function (k) { return reach[k]; });
       var cand = [];
       cells.forEach(function (c) {
         var n = 0;
-        for (var i = 0; i < pool.length; i++) { var u = pool[i]; if (u === me || fp[(u.pos.x - c.x) + "," + (u.pos.y - c.y)]) n++; }
+        for (var i = 0; i < pool.length; i++) { var v = pool[i]; if (v === u || fp[(v.pos.x - c.x) + "," + (v.pos.y - c.y)]) n++; }
         if (n) cand.push({ c: c, n: n });
       });
       if (!cand.length) return null;
       cand.sort(function (x, y) { return (y.n - x.n) || (x.c.d - y.c.d); });
       var occ2 = {};
       Object.keys(occ).forEach(function (x) { occ2[x] = occ[x]; });
-      delete occ2[me.pos.x + "," + me.pos.y];
+      delete occ2[u.pos.x + "," + u.pos.y];
       var best = null, bestHits = 0, moreHitsFirst = chain[0] === "MoreHitCount";
       for (var i = 0; i < cand.length; i++) {
         var c = cand[i].c;
-        if (moreHitsFirst && best && cand[i].n < bestHits) break;        /* no cell left can beat the best */
-        var k = c.x + "," + c.y, saved = me.pos;
-        occ2[k] = me; me.pos = { x: c.x, y: c.y };
-        var all = plans(me, sk, c, occ2);
-        me.pos = saved; delete occ2[k];
+        if (moreHitsFirst && best && cand[i].n < bestHits) break;
+        var k = c.x + "," + c.y, saved = u.pos;
+        occ2[k] = u; u.pos = { x: c.x, y: c.y };
+        var all = plans(u, sk, c, occ2);
+        u.pos = saved; delete occ2[k];
         for (var j = 0; j < all.length; j++) {
-          var sc = scoreOf(chain, me, c, all[j]);
+          var sc = scoreOf(chain, u, c, all[j]);
           if (!best || better(sc, best.score)) { best = { plan: all[j], cell: c, score: sc }; best.plan.score = sc; bestHits = all[j].union.length; }
         }
       }
       return best;
     }
-    function walkTo(me, cell) {
-      var path = [];
-      for (var c = cell; c; c = c.from) path.unshift([c.x, c.y]);
-      me.pos = { x: cell.x, y: cell.y };
-      return path.length - 1;
+    function walkTo(u, cell) {
+      var from = { x: u.pos.x, y: u.pos.y };
+      u.pos = { x: cell.x, y: cell.y };
+      var n = cell.d || dist(from, cell);
+      if (n) afterMoved(u, from);
+      return n;
     }
-    /* no cast possible anywhere in reach: walk toward the nearest enemy (or the taunter) as far as allowed */
-    function approach(me, reach) {
-      var goal = me.taunt || nearest(me, enemiesOf(me));
+    function approach(u, reach) {
+      var goal = u.taunt || nearest(u, enemiesOf(u));
       if (!goal) return 0;
-      var best = null, bd = dist(me.pos, goal.pos);
+      var best = null, bd = dist(u.pos, goal.pos);
       Object.keys(reach).forEach(function (k) { var c = reach[k]; var d = dist(c, goal.pos); if (d < bd || (d === bd && best && c.d < best.d)) { bd = d; best = c; } });
-      return best ? walkTo(me, best) : 0;
+      return best ? walkTo(u, best) : 0;
     }
-    function nearest(u, list) {
-      var best = null, bd = 1e9;
-      list.forEach(function (v) { var d = dist(u.pos, v.pos); if (d < bd) { bd = d; best = v; } });
-      return best;
-    }
-    function lowestHp(list) { return list.slice().sort(function (a, b) { return a.hp / a.s.hp - b.hp / b.s.hp; })[0]; }
+    function moveBudget(u) { return rooted(u) ? 0 : (u.s.move || GRID.defaultMove); }
 
-    var me = null;
+    /* ---- one cast ---- */
     function cast(t, slot, pl) {
-      var pick = t.sk, rolled = [], total = 0;
-      var isAttack = !pick.ec || pick.ec.skillType === "Attack" || pick.id === 0;
+      var pick = t.sk, rolled = [], total = 0, targets = {};
+      var ec = pick.ec || {};
+      var isAttack = !ec.skillType || ec.skillType === "Attack";
       var selfish = isAlly(pick);
+      var aim = pl.aim, dir = pl.dir;
+      if (ec.flipSource !== false) me.flip = flipFor(me.pos, aim, me.flip);
+      var flip = pl.flip;
       if (slot >= 0) procs(me, "skillStart", pl.primary, pl.primary);
+      /* the caster's own displacement (SourceMoveList) comes first */
+      (ec.sourceMove || []).forEach(function (cfg) { forceMove(me, cfg, me, aim, dir, flip, pick.name); });
+      var occ = unitAt(), pool = poolFor(me, pick);
+      var g = geo(pick), e = pl.entry, fall = {};
       var meE = eff(me, ents);
+      /* Curse Resonance / Pursuit of Victory: an outgoing bonus sized by the target's debuffs, per target */
+      function boostFor(foe) {
+        var add = 0;
+        eachPassive(me, function (pv, ch) {
+          if (pv.kind !== "dmgAdd" || (pv.onlyAttack && !isAttack)) return;
+          var n = 1;
+          if (pv.needTargetStatus) {
+            var ids = {}, cnt = 0;
+            foe.st.forEach(function (x) { if ((pv.anyTypes || []).indexOf(x.meta.type) >= 0) { cnt++; ids[x.id] = 1; } });
+            n = pv.countType === "EntityClassIdCount" ? Object.keys(ids).length : cnt;
+            if (!n) return;
+            if (!pv.scaleByCount) n = 1;
+            if (pv.maxCount > 0) n = Math.min(n, pv.maxCount);
+            n *= pv.unit || 1;
+          }
+          add += charmVal(ch, me, "StatusDmgAddPer") / 100 * n;
+        });
+        return add;
+      }
       var rows = pick.id === 0 ? {} : (pick.r[String(t.rank)] || {});
-      var hitsCfg = (pick.ec && pick.ec.hits && pick.ec.hits.length) ? pick.ec.hits : null;
-      pl.union.forEach(function (foe) {
-        if (!foe.alive) return;
-        var foeE = eff(foe, ents);
-        var parts = hitParts(meE, foeE, pick, rows, t.level);
-        if (parts.heal) {
-          var before = foe.hp; foe.hp = Math.min(foe.s.hp, foe.hp + parts.heal * GOV);
-          if (events) events.push({ kind: "heal", who: foe.i, amount: foe.hp - before, tag: pick.name });
+      var partsCache = {};
+      function partsFor(foe) {
+        if (partsCache[foe.i]) return partsCache[foe.i];
+        var foeE = eff(foe, ents), mE = meE;
+        var extra = boostFor(foe);
+        if (extra) { mE = {}; Object.keys(meE).forEach(function (k) { mE[k] = meE[k]; }); mE.boost = (meE.boost || 0) + extra; }
+        return partsCache[foe.i] = { E: foeE, mE: mE, parts: hitParts(mE, foeE, pick, rows, t.level) };
+      }
+      var hitTargets = {};      /* hit index -> units it damaged (for child skills) */
+      function applyHit(hi, foe, p, mE, foeE, hrow, tag, gate, rankUsed, levelUsed) {
+        if (!foe.alive) return 0;
+        var h = p.hits[hi]; if (!h) return 0;
+        var here = 0;
+        if (h.d > 0 && !selfish) {
+          var r0 = [];
+          here = landHits({ hits: [h] }, me, foe, mE, foeE, { ec: ec, gov: gate, name: pick.name, id: pick.id, ele: pick.ele, noHooks: ec.canTriggerChild === false }, r0, rankUsed, levelUsed, fall);
+          r0.forEach(function (x) { x.hi = hi; rolled.push(x); });
+          total += here;
         }
-        /* only the hits whose area covers this target land on it */
-        var mine = [];
-        parts.hits.forEach(function (h, hi) { var lst = pl.perHit[hitsCfg ? hi : 0]; if (!lst || lst.indexOf(foe) >= 0) mine.push({ h: h, hi: hi }); });
-        var here = 0, r0 = [];
-        if (mine.length && !selfish) { here = landHits({ hits: mine.map(function (m) { return m.h; }) }, me, foe, meE, foeE, pick, r0, t.rank, t.level); rolled = rolled.concat(r0); total += here; }
-        mine.forEach(function (m, k) {
-          if (r0.some(function (x) { return x.hi === k && x.blinded; })) return;
-          m.h.on.forEach(function (o) {
-            var meta = DATA.statuses[String(o.status)];
-            if (!meta || meta.falloff) return;
-            var tgt = (o.target === "DamageTarget" || selfish) ? foe : me;
-            if (!tgt.alive) return;
-            var chance = landChance(o.chance, o.byProp, meta.type, meE, foeE);
-            tgt.st.forEach(function (x) {
-              var bo = x.meta.boosts;
-              if (bo && bo.actions.indexOf(meta.action) >= 0 && x.meta.props) {
-                var r = x.meta.props[String(x.rank)] || {};
-                if (r[bo.prop]) chance += curveValue(r[bo.prop], x.rank, x.level, ents[x.creator].s.rank.name) / 100;
-              }
-            });
-            if (rng() < chance) {
-              var st = applyStatus(tgt, o.status, me, t.rank, t.level);
-              if (st && meta.shield) { var amt = shieldSize(meta, me, tgt, t.rank, t.level) * GOV; if (amt > 0) tgt.shield = Math.max(tgt.shield, amt); }
-              if (st && events) events.push({ kind: "status", who: tgt.i, name: statusName(meta) });
+        var blindedHit = rolled.some(function (x) { return x.hi === hi && x.who === foe.i && x.blinded; });
+        if (!blindedHit) h.on.forEach(function (o) {
+          var meta = DATA.statuses[String(o.status)];
+          if (!meta || meta.falloff) return;
+          var tgt = (o.target === "DamageTarget" || selfish) ? foe : me;
+          if (!tgt.alive) return;
+          var chance = landChance(o.chance, o.byProp, meta.type, mE, foeE);
+          tgt.st.forEach(function (x) {
+            var bo = x.meta.boosts;
+            if (bo && bo.actions.indexOf(meta.action) >= 0 && x.meta.props) {
+              var r = x.meta.props[String(x.rank)] || {};
+              if (r[bo.prop]) chance += curveValue(r[bo.prop], x.rank, x.level, ents[x.creator].s.rank.name) / 100;
             }
           });
+          if (rng() < chance) {
+            var st = applyStatus(tgt, o.status, me, rankUsed, levelUsed);
+            if (st && meta.shield) { var amt = shieldSize(meta, me, tgt, rankUsed, levelUsed); if (amt > 0) tgt.shield = Math.max(tgt.shield, amt); }
+            if (st && events) events.push({ kind: "status", who: tgt.i, name: statusName(meta) });
+          }
         });
-        if (here > 0) { procs(me, "hit", foe, foe, function (pv) { return !(pv.onlyAttack && !isAttack); }); procs(foe, "damaged", me, me); }
-        kill(foe);
+        (hitTargets[hi] = hitTargets[hi] || []).push(foe);      /* a child skill is cast on every unit the hit covers */
+        var hc = g.hits[hi];
+        if (hc && hc.move && !hc.child && foe.alive && rng() < (hc.move.chance === undefined ? 1 : hc.move.chance)) forceMove(foe, hc.move, me, aim, dir, flip, pick.name);
+        kill(foe, me);
+        return here;
+      }
+      /* fixed hits, random groups and child skills, in prefab order */
+      var doneGroups = {};
+      g.hits.forEach(function (h, hi) {
+        if (h.child) {
+          /* a skill cast on every unit the parent hit damaged: its own rows, statuses and forced move */
+          var parents = hitTargets[h.child.of] || [];
+          if (!parents.length || rng() >= (h.child.chance === undefined ? 1 : h.child.chance)) return;
+          var crow = (h.childRows || {})[String(t.rank)] || {};
+          var fakeChild = { id: h.child.eid, name: pick.name, ele: h.childEle || pick.ele, ec: { hits: [h], skillType: "Attack", target: ec.target }, hits: 1, r: h.childRows || {}, pvp: h.childPvp || 10000, gov: h.childGov !== false };
+          parents.forEach(function (foe) {
+            if (!foe.alive) return;
+            var foeE = eff(foe, ents);
+            var cp = hitParts(meE, foeE, fakeChild, crow, t.level);
+            if (cp.heal) { heal(foe, cp.heal, pick.name); }
+            else if (cp.hits.length && cp.hits[0].d > 0) {
+              var r1 = [];
+              var dd = landHits({ hits: [cp.hits[0]] }, me, foe, meE, foeE, fakeChild, r1, t.rank, t.level, fall);
+              r1.forEach(function (x) { x.hi = hi; rolled.push(x); });
+              total += dd;
+            }
+            h.on.forEach(function (o) {
+              var meta = DATA.statuses[String(o.status)]; if (!meta || meta.falloff) return;
+              if (rng() < landChance(o.chance, o.byProp, meta.type, meE, foeE)) { var st = applyStatus(foe, o.status, me, t.rank, t.level); if (st && events) events.push({ kind: "status", who: foe.i, name: statusName(meta) }); }
+            });
+            if (h.move && foe.alive && rng() < (h.move.chance === undefined ? 1 : h.move.chance)) forceMove(foe, h.move, me, aim, dir, flip, pick.name);
+            targets[foe.i] = 1;
+            kill(foe, me);
+          });
+          return;
+        }
+        if (h.rnd) {
+          if (doneGroups[h.rnd.g]) return;
+          doneGroups[h.rnd.g] = 1;
+          var grp = e.groups[h.rnd.g], cfg = grp.cfg;
+          /* FightHitRandomTargetComponent: one pick per HitCfg with replacement from the pool cells */
+          var cellsAll = grp.pool.map(function (c) { return { x: me.pos.x + c[0], y: me.pos.y + c[1] }; }).filter(function (c) { return c.x >= 0 && c.y >= 0 && c.x < GRID.w && c.y < GRID.h; });
+          function occupied() { return cellsAll.filter(function (c) { var u = occ[c.x + "," + c.y]; return u && u.alive && pool.indexOf(u) >= 0; }); }
+          var usedTargets = {}, usedCells = {};
+          for (var k = 0; k < (grp.n || 1); k++) {
+            var occNow = occupied();
+            var need = k < (cfg.minHits || 0) || !cfg.allowEmpty;
+            var from = need ? occNow : cellsAll;
+            if (cfg.notSameTarget) from = from.filter(function (c) { var u = occ[c.x + "," + c.y]; return !u || !usedTargets[u.i]; });
+            if (cfg.notSameGrid) from = from.filter(function (c) { return !usedCells[c.x + "," + c.y]; });
+            if (!from.length) { if (need && cellsAll.length && cfg.allowEmpty) from = cellsAll; else continue; }
+            var c = from[Math.floor(rng() * from.length)];
+            usedCells[c.x + "," + c.y] = 1;
+            /* every hit this pick expands to lands around the picked cell */
+            grp.subs.filter(function (sb) { return sb.pick === k; }).forEach(function (sub) {
+              sub.cells.forEach(function (w) {
+                var u = occ[(c.x + w[0]) + "," + (c.y + w[1])];
+                if (!u || !u.alive || pool.indexOf(u) < 0) return;
+                usedTargets[u.i] = 1;
+                var pf = partsFor(u);
+                applyHit(sub.hi, u, pf.parts, pf.mE, pf.E, rows, pick.name, pick.gov !== false, t.rank, t.level);
+                targets[u.i] = 1;
+              });
+            });
+            occ = unitAt();
+          }
+          return;
+        }
+        (pl.perHit[hi] || []).forEach(function (foe) {
+          if (!foe.alive) return;
+          var pf = partsFor(foe);
+          if (pf.parts.heal && !targets[foe.i]) heal(foe, pf.parts.heal, pick.name);
+          applyHit(hi, foe, pf.parts, pf.mE, pf.E, rows, pick.name, pick.gov !== false, t.rank, t.level);
+          targets[foe.i] = 1;
+        });
+        if (h.summon && h.summon.gridItem && h.summon.gridStatuses && h.summon.gridStatuses.length) {
+          /* FightHitSummon: every SummonScope cell rolls its own Rate for the grid item and its statuses */
+          var origin = h.onSource ? me.pos : aim;
+          (h.cells || []).forEach(function (c, ci) {
+            var w = turn(c, dir, flip);
+            var rate = (h.summon.rates || [])[ci]; if (rate === undefined) rate = h.summon.rate === undefined ? 1 : h.summon.rate;
+            if (rng() < rate) placeGrid(origin.x + w[0], origin.y + w[1], h.summon.gridStatuses, me, t.rank, t.level, pick.name);
+          });
+        } else if (h.summon && (h.summon.creature || (h.summon.pools && h.summon.pools.length))) {
+          if (events) events.push({ kind: "info", who: me.i, text: "summons a creature — summoned units are not modelled" });
+        }
+        occ = unitAt();
       });
       var bl = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
       if (bl && isAttack) removeStatus(me, bl);
       if (slot >= 0) {
         me.cd[slot] = cdOf(t) + 1; me.uses[slot]++; me.techCasts++;
+        spendSkillStatuses(me, isAttack);
         procs(me, "skillEnd", pl.primary, pl.primary, function (pv) { return me.techCasts % pv.every === 0; });
       }
-      return { rolled: rolled, total: total, targets: pl.union.map(function (u) { return u.i; }), aim: [pl.aim.x, pl.aim.y] };
+      return { rolled: rolled, total: total, targets: Object.keys(targets).map(Number), aim: [aim.x, aim.y] };
     }
 
-
-    /* "Casts once before battle starts": AutoAIAtStart / AutoSelfAtStart Techniques fire before round 1 in speed
-       order (FightAIPlayStartComponent), aimed from where each fighter stands, then sit on their cooldown */
+    /* ---- the PlayStart phase ---- */
     (function preBattle() {
-      /* GameStatus.PlayStart: the AI is driven on a fixed interval (Battle.DrivePlayStartAIInterval) before Play.
-         Each tick every fighter fires its next uncast start skill (skill.TryAtStartType), in slot order, the faster
-         fighter first within a tick; the ticks repeat until nobody has a start skill left. So both sides' opening
-         buffs land before the faster tank's taunt, as seen in real fights. */
       var queue = ents.map(function (u) { return u.techs.map(function (t, k) { return t && t.sk.startCast ? k : -1; }).filter(function (k) { return k >= 0; }); });
       var order = ents.slice().sort(function (x, y) { return (x.t - y.t) || (x.i - y.i); });
       for (var tick = 0; tick < 8; tick++) {
@@ -791,7 +1210,7 @@
           me.taunt = null;
           me.st.forEach(function (x) { if (x.meta.action === "Ridicule" && ents[x.creator].alive && ents[x.creator].side !== me.side) me.taunt = ents[x.creator]; });
           events = wantLog ? [] : null;
-          var pm = planWithMove(me, me.techs[k].sk, reachable(me, me.s.move || GRID.defaultMove), unitAt());
+          var pm = planWithMove(me, me.techs[k].sk, reachable(me, moveBudget(me)), unitAt());
           var moved0 = 0;
           if (!pm) return;
           if (pm.cell.d > 0) { moved0 = walkTo(me, pm.cell); if (events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] }); }
@@ -802,19 +1221,21 @@
       }
     })();
 
+    /* ---- the fight ---- */
     var winner = -1, order = 0, rounds = 0;
     while (turns < MAXT) {
       var A = alive(0), B = alive(1);
       if (!A.length || !B.length) { winner = A.length ? 0 : 1; break; }
       if (maxRounds > 0 && rounds >= maxRounds) { capped = true; break; }
-      /* the SPD clock: earliest NextTime acts; equal times keep queue order (FIFO) */
       me = null;
       A.concat(B).forEach(function (u) { if (!me || u.t < me.t - 1e-9 || (Math.abs(u.t - me.t) < 1e-9 && u.order < me.order)) me = u; });
       turns++; me.turns++; rounds++; me.order = ++order;
-      events = wantLog ? [] : null;
+      events = wantLog ? [] : null; var startEv = events;   /* round-start events ride with the first entry of the turn */
       var moved = 0;
       me.taunt = null;
       me.st.forEach(function (x) { if (x.meta.action === "Ridicule" && ents[x.creator].alive && ents[x.creator].side !== me.side) me.taunt = ents[x.creator]; });
+      /* starting a round on a grid item (TryAtStandRound) */
+      fxAt(me.pos.x, me.pos.y).forEach(function (f) { if (f.meta.moveNear.onStand) fireGrid(f, me); });
 
       me.st.slice().forEach(function (st) {
         (st.meta.roundStart || []).forEach(function (t) {
@@ -834,7 +1255,7 @@
       if (skip) {
         if (wantLog) log.push(entry(me, null, -1, [], 0, events, skip.meta.action, 0, moved));
       } else {
-        var occ = unitAt(), reach = reachable(me, me.s.move || GRID.defaultMove);
+        var occ = unitAt(), reach = reachable(me, moveBudget(me));
         var ready = [];
         me.techs.forEach(function (t, k) {
           if (!t || me.cd[k] !== 0) return;
@@ -845,36 +1266,26 @@
         for (var ri = 0; ri < ready.length && me.alive; ri++) {
           var k = ready[ri], cand = me.techs[k], last = ri === ready.length - 1;
           if (!enemiesOf(me).length) break;
-          /* each cast weighs a fresh hop from where the fighter now stands (moves and casts interleave; the
-             client has no per-turn move budget, only MoveDist per hop) */
           var pm = planWithMove(me, cand.sk, reach, occ, last);
           if (!pm) continue;
-          if (redundant(cand.sk, me, pm.plan.primary)) continue;
-          events = wantLog ? [] : null;
+          events = wantLog ? (startEv && startEv.length ? startEv.splice(0) : []) : null;
           var hop = 0;
           if (pm.cell.d > 0) {
-            hop = walkTo(me, pm.cell); moved += hop; occ = unitAt(); reach = reachable(me, me.s.move || GRID.defaultMove);
+            hop = walkTo(me, pm.cell); moved += hop;
             if (events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] });
           }
           var r = cast(cand, k, pm.plan);
           casts++;
           if (wantLog) log.push(entry(me, cand.sk, k, r.rolled, r.total, events, null, sub++, hop, r.targets));
+          occ = unitAt(); reach = reachable(me, moveBudget(me));
         }
         if (casts === 0 && me.alive && enemiesOf(me).length) {
-          events = wantLog ? [] : null;
-          var pmb = planWithMove(me, BASIC, reach, occ, true), hopb = 0, pb = null;
-          if (pmb) {
-            if (pmb.cell.d > 0) { hopb = walkTo(me, pmb.cell); moved += hopb; occ = unitAt(); if (events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] }); }
-            pb = pmb.plan;
-          } else {
-            hopb = approach(me, reach); moved += hopb;
-            if (hopb && events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] });
-          }
-          if (pb) {
-            var rb = cast({ sk: BASIC, rank: 1, level: 1, id: 0, name: BASIC.name }, -1, pb);
-            procs(me, "roundCheck", pb.primary, me);
-            if (wantLog) log.push(entry(me, BASIC, -1, rb.rolled, rb.total, events, null, 0, hopb, rb.targets));
-          } else if (wantLog) log.push(entry(me, null, -1, [], 0, events, "moved", 0, hopb));
+          /* nothing castable from anywhere in reach: there is no basic attack in the client. Whether an idle
+             fighter walks is server-side; this walks toward the nearest enemy (or the taunter) and says so */
+          events = wantLog ? (startEv && startEv.length ? startEv.splice(0) : []) : null;
+          var hop0 = approach(me, reach); moved += hop0;
+          if (hop0 && events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] });
+          if (wantLog) log.push(entry(me, null, -1, [], 0, events, hop0 ? "moved" : "idle", 0, hop0));
         }
       }
       procs(me, "roundEnd", null, me);
@@ -882,14 +1293,15 @@
       me.t += interval(eff(me, ents));
     }
     if (winner < 0 && turns >= MAXT) capped = true;
-    function entry(me, pick, slot, rolled, total, ev, note, sub, moved, targets) {
-      return { t: Math.round(me.t), who: me.i, side: me.side, slot: slot, sub: sub || 0,
-               skill: pick ? (note === "prebattle" ? pick.name + " (before battle)" : pick.name) : (note === "start" ? "—" : note === "moved" ? "moved, no one in reach" : note + " — no action"),
+    function entry(u, pick, slot, rolled, total, ev, note, sub, moved, targets) {
+      return { t: Math.round(u.t), who: u.i, side: u.side, slot: slot, sub: sub || 0,
+               skill: pick ? (note === "prebattle" ? pick.name + " (before battle)" : pick.name) : (note === "start" ? "—" : note === "moved" ? "no Technique ready — closes in" : note === "idle" ? "no Technique ready" : note + " — no action"),
                skillId: pick ? pick.id : 0, ele: pick ? pick.ele : "None", hits: rolled, dmg: total, targets: targets || [],
-               dur: pick && pick.ec && pick.ec.dur ? pick.ec.dur : 0.8, events: ev || [], turn: me.turns, note: note, moved: moved || 0,
-               hp: ents.map(function (u) { return Math.max(0, u.hp); }), sh: ents.map(function (u) { return Math.round(u.shield); }),
-               pos: ents.map(function (u) { return [u.pos.x, u.pos.y]; }),
-               st: ents.map(function (u) { return u.st.map(function (x) { return { n: statusName(x.meta, x.props), d: x.dur, s: x.stacks, t: x.meta.type }; }); }) };
+               dur: pick && pick.ec && pick.ec.dur ? pick.ec.dur : 0.8, events: ev || [], turn: u.turns, note: note, moved: moved || 0,
+               hp: ents.map(function (x) { return Math.max(0, x.hp); }), sh: ents.map(function (x) { return Math.round(x.shield); }),
+               pos: ents.map(function (x) { return [x.pos.x, x.pos.y]; }),
+               fx: gridFx.map(function (f) { return [f.x, f.y, fxLabel(f), f.dur, f.tag]; }),
+               st: ents.map(function (x) { return x.st.map(function (y) { return { n: statusName(y.meta, y.props), d: y.dur, s: y.stacks, t: y.meta.type }; }); }) };
     }
     var hpLeft = ents.map(function (u) { return Math.max(0, u.hp); });
     if (winner < 0) {
@@ -1011,7 +1423,12 @@
   }
   function placeTokens(cur) {
     drawBoard(cur ? viewFor(cur.pos) : baseView());
-    document.querySelectorAll("#board .cell").forEach(function (c) { c.innerHTML = ""; c.classList.remove("from", "aim"); });
+    document.querySelectorAll("#board .cell").forEach(function (c) { c.innerHTML = ""; c.classList.remove("from", "aim", "fx"); c.removeAttribute("data-fx"); });
+    ((cur && cur.fx) || []).forEach(function (f) {
+      var c = cellAt(f[0], f[1]); if (!c) return;
+      c.classList.add("fx"); c.setAttribute("data-fx", f[2] + (f[3] > 0 ? " " + f[3] : ""));
+      c.title = f[4] + " · " + f[2].toLowerCase() + (f[3] > 0 ? " · " + f[3] + " turn" + (f[3] === 1 ? "" : "s") + " of the caster left" : "");
+    });
     fightersFlat().forEach(function (f, i) {
       if (!f) return;
       var p = cur ? { x: cur.pos[i][0], y: cur.pos[i][1] } : POS[i];
@@ -1246,6 +1663,8 @@
 
   /* ---------- the timeline and the scene ---------- */
   function eventText(F, e) {
+    if (e.kind === "grid") return esc(e.tag) + " sets column " + (e.x + 1) + ", row " + (e.y + 1) + " on " + esc((e.label || "").toLowerCase());
+    if (e.kind === "info") return esc(F[e.who].name) + " " + esc(e.text);
     if (e.kind === "dmg") return esc(F[e.who].name) + " takes " + short(e.amount) + " from " + esc(e.tag);
     if (e.kind === "heal") return esc(F[e.who].name) + " heals " + short(e.amount) + (e.tag ? " (" + esc(e.tag) + ")" : "");
     if (e.kind === "status") return esc(F[e.who].name) + ": " + esc(e.name) + (e.tag ? " (" + esc(e.tag) + ")" : "");
@@ -1288,7 +1707,7 @@
     } else {
       var l = log[k - 1], prev = k >= 2 ? log[k - 2] : null;
       F.forEach(function (f, i) { hpSet(i, l.hp[i], f.sheet.hp, l.sh[i]); chips(i, l.st[i]); });
-      placeTokens({ hp: l.hp, sh: l.sh, pos: l.pos, st: l.st, alive: l.hp.map(function (h) { return h > 0; }) });
+      placeTokens({ hp: l.hp, sh: l.sh, pos: l.pos, st: l.st, fx: l.fx, alive: l.hp.map(function (h) { return h > 0; }) });
       var actor = document.querySelector('#board .token[data-i="' + l.who + '"]');
       if (actor) actor.classList.add("acting");
       (l.targets || []).forEach(function (i) { var t = document.querySelector('#board .token[data-i="' + i + '"]'); if (t) t.classList.add("hit"); });

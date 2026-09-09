@@ -64,6 +64,24 @@ SCHEMAS, BASES, ENUMS = SCH["schemas"], SCH["bases"], SCH["enums"]
 RAW = {"float": 4, "double": 8, "Vector3": 12, "Vector2": 8, "Vector4": 16, "Quaternion": 16, "Color": 16}
 
 
+def _polymorphic():
+    """[SerializeReference]-style fields: a declared type in RootSerializer's BaseSerializable<T> list is written
+    as a 2-byte little-endian opcode (SerializeType const of the concrete class; 0 = null) and then that class's
+    own array. The same rule the live protocol uses."""
+    root = ROOT / "out" / "decompiled" / "Console" / "AutoMPG" / "RootSerializer.cs"
+    st = DEC / "SerializeType.cs"
+    prefixed, ops = set(), {}
+    if root.exists():
+        prefixed = set(re.findall(r"new BaseSerializable<(.+?)>()", root.read_text(encoding="utf-8", errors="replace")))
+    if st.exists():
+        for name, val in re.findall(r"public const ushort (\w+) = (\d+);", st.read_text(encoding="utf-8", errors="replace")):
+            ops[int(val)] = name
+    return prefixed, ops
+
+
+PREFIXED, OPCODES = _polymorphic()
+
+
 def keys_of(cls):
     """All [Key] fields including inherited ones, ordered by key index."""
     out = {}
@@ -123,6 +141,17 @@ def read_value(r: Reader, t: str):
     if t in ENUMS:
         v = r.std()
         return ENUMS[t].get(str(v), v) if isinstance(v, int) else v
+    if t in PREFIXED:
+        op = struct.unpack_from("<H", r.b, r.i)[0]; r.i += 2
+        if op == 0:
+            return None
+        cls = OPCODES.get(op)
+        if cls is None:
+            raise ValueError(f"unknown opcode {op} for {t} at {r.i - 2}")
+        obj = read_object(r, cls) if keys_of(cls) else {}
+        if isinstance(obj, dict):
+            obj = {"__type": cls, **obj}
+        return obj
     if t in SCHEMAS and keys_of(t):
         return read_object(r, t)
     v = r.std()
@@ -148,6 +177,9 @@ def read_object(r: Reader, cls: str):
 
 def decode_component(name: str, blob: bytes):
     info_cls = name.split(".")[-1] + "Info"
+    cls = name.split(".")[-1]
+    while info_cls not in SCHEMAS and BASES.get(cls):     # a component that reuses its base's Info class
+        cls = BASES[cls]; info_cls = cls + "Info"
     r = Reader(blob[2:])
     obj = read_object(r, info_cls)
     return obj, len(r.b) - r.i

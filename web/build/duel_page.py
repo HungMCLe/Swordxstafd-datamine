@@ -291,8 +291,7 @@ end of your turns or on a turn with no Technique (Blade Siphon, Counter Blade, F
 so many Techniques (Blazing Clash), per 15% of HP lost (Frame of Battles) or when HP drops under a fraction (Pure
 Protection); a Mark that pays out at ten stacks with the Charm's own damage (Blade of Judgment); a lethal hit floored
 at 1 HP once, with the heal on the card (Indomitable Will). The sim runs all of those. Component types it has no model
-for yet &mdash; summons, grid range, kill triggers, revival, damage-process hooks &mdash; are named on the Charm's
-hover card and in the note under the odds, so a Charm never silently does nothing.</p>
+for are named on the Charm's hover card and in the note under the odds, so a Charm never silently does nothing.</p>
 <p><b>Timing is the prefab's.</b> Every hit carries the moment it lands (<code>HitCfg.Delay</code>): Eclipse
 Slash's six cuts fall at 0.3, 0.4, 0.78, 0.9, 1.04 and 1.48 seconds; Divine Wrath's sixteen from 0.85 to 2.24.
 At 1x the scene plays them at that pace.</p>
@@ -310,6 +309,16 @@ for hard controls against a higher-ranked target, and Damp raising the odds of F
 <p><b>Charms with procs</b> now fire: on-hit skills, each-turn skills, when-hit skills (reflect), and the
 turn-with-no-Technique check that Frost Guard uses. Fear, Confusion, Ridicule and Restrict are applied and shown but
 change nothing here &mdash; taunts and movement have no meaning in a 1v1 without a grid.</p>
+<p><b>Hits and hooks follow the prefab's conditions.</b> A hit typed <code>HitDamageType.None</code> deals nothing
+itself but still applies its statuses and child skills: Wind's Delight's damage is its child skill, seven waves that
+decay 35% per repeat on the same target (<code>FightStatusDamageFalloffComponent</code>). Child skills bring their
+own numbers, PvP scale and governor gate. A when-hit Charm fires only on the events its component names: Rebound on
+a hit the wearer <i>blocks</i>, Counter Blade on any damage, a Charm with <code>ConditionCount</code> every Nth
+event; the strike a Charm fires cannot set off further Charms when its skill's <code>CanTriggerChild</code> is off
+(Radiant Sear's, Rebound's, a Burn tick). Meteoric Flames' 60% Burn cell under the opponent burns at once and again
+each time they start a turn on it, for three of the caster's rounds; in a 1v1 nobody steps off it. Block is rolled
+before crit and cancels it; both chances fold the flat value forms over their per-rank bases, and the attacker's
+Accuracy lowers the block divisor too. Heals run the client's <code>Cure()</code> and are never governed.</p>
 <p><b>Before round 1.</b> The fight has a <code>PlayStart</code> status before <code>Play</code>, during which
 the AI is driven on a fixed interval, and a Technique whose card says "Casts once before battle starts"
 (<code>skill.TryAtStartType</code>, e.g. Heart of Challenge, Valor Surge) fires then: on each tick both fighters
@@ -318,8 +327,8 @@ fire their next start skill, the faster one first, and each then sits on its coo
 counted in that caster's turns. The engine's test is <code>Round &minus; LastRound &gt; CD</code>, so a skill with no
 cooldown fires every turn, a CD&nbsp;1 skill sits out one full turn and returns the turn after, and every skill
 opens the fight on its full cooldown &mdash; a CD&nbsp;2 skill first goes on turn&nbsp;3, or turn&nbsp;2 with Rapid Cast.
-A turn with three ready skills is three casts. A basic attack happens only when nothing is ready, which is
-also when Charms like Frost Guard that key off a Technique-less turn fire. Blind is spent by the first attack of
+A turn with three ready skills is three casts. There is no basic attack in the client: with nothing ready the
+turn passes, which is when Charms like Frost Guard that key off a Technique-less turn fire. Blind is spent by the first attack of
 the turn. The prefab lists the AI's tie-break priorities for <i>targets</i>, but there is no grid here, so
 range, area and positioning do nothing.</p>
 </div>

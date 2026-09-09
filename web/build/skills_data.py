@@ -637,12 +637,16 @@ def main():
                     v = sk["vals"].get(str(rk), {})
                     lm = sk["lmult"].get(str(rk), {})
                     row = {}
-                    for key in ("SkillAttack1", "SkillAttack2", "SkillAttack3", "CD"):
+                    for key in ("SkillAttack1", "SkillAttack2", "SkillAttack3", "SkillAttack4", "CD",
+                                "SkillCureByHp", "SkillCureByAttack", "SkillCureByTargetHp"):
                         if key in v:
                             row[key] = v[key]
                     if "SkillFixedAttack1" in lm:
                         row["fx"] = lm["SkillFixedAttack1"]
                         row["fg"] = sk["lgroup"]["SkillFixedAttack1"]
+                    if "SkillFixedCure" in lm:                     # the flat part of a heal, on its growth curve
+                        row["SkillFixedCure"] = lm["SkillFixedCure"]
+                        row["SkillFixedCure_g"] = sk["lgroup"]["SkillFixedCure"]
                     if row:
                         per[str(rk)] = row
                 _ep = eps.get(sk.get("entity") or 0) or {}
@@ -651,10 +655,13 @@ def main():
                 except Exception:
                     _pvp = 10000
                 _tas = (skills.get(sk["id"]) or {}).get("TryAtStartType", "").strip()
+                _gov = (_ep.get("AffectedBySkillRank") or "").strip().upper() == "TRUE"
                 duel.append({"id": sk["id"], "name": sk["name"], "cls": c["name"], "pvp": _pvp,
                              # skill.TryAtStartType: "Casts once before battle starts" (AutoAIAtStart) or a
                              # self-cast at the start (AutoSelfAtStart), before round 1, fastest first
                              "startCast": {"AutoAIAtStart": "ai", "AutoSelfAtStart": "self"}.get(_tas),
+                             # entity_prop_skill.AffectedBySkillRank: whether the PvP governor scales this skill's damage
+                             "gov": _gov,
                              "desc": _rt((sk.get("desc") or "").strip(), sk.get("links")),
                              "tier": t["tier"], "ele": m.group(1) if m else "Physical",
                              "hits": max(1, min(hits, 20)), "r": per,
