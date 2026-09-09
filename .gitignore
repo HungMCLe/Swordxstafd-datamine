@@ -15,4 +15,3 @@ __pycache__/
 *.pyc
 .DS_Store
 tools/liveproto/schema.json
-web/dist/assets/fighters.json

@@ -640,13 +640,88 @@
     }
     function lowestHp(list) { return list.slice().sort(function (a, b) { return a.hp / a.s.hp - b.hp / b.s.hp; })[0]; }
 
+    var me = null;
+    function cast(t, slot, pl) {
+      var pick = t.sk, rolled = [], total = 0;
+      var isAttack = !pick.ec || pick.ec.skillType === "Attack" || pick.id === 0;
+      var selfish = isAlly(pick);
+      if (slot >= 0) procs(me, "skillStart", pl.primary, pl.primary);
+      var meE = eff(me, ents);
+      var rows = pick.id === 0 ? {} : (pick.r[String(t.rank)] || {});
+      var hitsCfg = (pick.ec && pick.ec.hits && pick.ec.hits.length) ? pick.ec.hits : null;
+      pl.union.forEach(function (foe) {
+        if (!foe.alive) return;
+        var foeE = eff(foe, ents);
+        var parts = hitParts(meE, foeE, pick, rows, t.level);
+        if (parts.heal) {
+          var before = foe.hp; foe.hp = Math.min(foe.s.hp, foe.hp + parts.heal * GOV);
+          if (events) events.push({ kind: "heal", who: foe.i, amount: foe.hp - before, tag: pick.name });
+        }
+        /* only the hits whose area covers this target land on it */
+        var mine = [];
+        parts.hits.forEach(function (h, hi) { var lst = pl.perHit[hitsCfg ? hi : 0]; if (!lst || lst.indexOf(foe) >= 0) mine.push({ h: h, hi: hi }); });
+        var here = 0, r0 = [];
+        if (mine.length && !selfish) { here = landHits({ hits: mine.map(function (m) { return m.h; }) }, me, foe, meE, foeE, pick, r0, t.rank, t.level); rolled = rolled.concat(r0); total += here; }
+        mine.forEach(function (m, k) {
+          if (r0.some(function (x) { return x.hi === k && x.blinded; })) return;
+          m.h.on.forEach(function (o) {
+            var meta = DATA.statuses[String(o.status)];
+            if (!meta || meta.falloff) return;
+            var tgt = (o.target === "DamageTarget" || selfish) ? foe : me;
+            if (!tgt.alive) return;
+            var chance = landChance(o.chance, o.byProp, meta.type, meE, foeE);
+            tgt.st.forEach(function (x) {
+              var bo = x.meta.boosts;
+              if (bo && bo.actions.indexOf(meta.action) >= 0 && x.meta.props) {
+                var r = x.meta.props[String(x.rank)] || {};
+                if (r[bo.prop]) chance += curveValue(r[bo.prop], x.rank, x.level, ents[x.creator].s.rank.name) / 100;
+              }
+            });
+            if (rng() < chance) {
+              var st = applyStatus(tgt, o.status, me, t.rank, t.level);
+              if (st && meta.shield) { var amt = shieldSize(meta, me, tgt, t.rank, t.level) * GOV; if (amt > 0) tgt.shield = Math.max(tgt.shield, amt); }
+              if (st && events) events.push({ kind: "status", who: tgt.i, name: statusName(meta) });
+            }
+          });
+        });
+        if (here > 0) { procs(me, "hit", foe, foe, function (pv) { return !(pv.onlyAttack && !isAttack); }); procs(foe, "damaged", me, me); }
+        kill(foe);
+      });
+      var bl = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
+      if (bl && isAttack) removeStatus(me, bl);
+      if (slot >= 0) {
+        me.cd[slot] = cdOf(t) + 1; me.uses[slot]++; me.techCasts++;
+        procs(me, "skillEnd", pl.primary, pl.primary, function (pv) { return me.techCasts % pv.every === 0; });
+      }
+      return { rolled: rolled, total: total, targets: pl.union.map(function (u) { return u.i; }), aim: [pl.aim.x, pl.aim.y] };
+    }
+
+
+    /* "Casts once before battle starts": AutoAIAtStart / AutoSelfAtStart Techniques fire before round 1 in speed
+       order (FightAIPlayStartComponent), aimed from where each fighter stands, then sit on their cooldown */
+    (function preBattle() {
+      var pre = [];
+      ents.forEach(function (u) { u.techs.forEach(function (t, k) { if (t && t.sk.startCast) pre.push({ u: u, k: k }); }); });
+      pre.sort(function (x, y) { return (x.u.t - y.u.t) || (x.u.i - y.u.i); });
+      pre.forEach(function (p) {
+        me = p.u;
+        if (!me.alive || !enemiesOf(me).length) return;
+        me.taunt = null;
+        var pl = plan(me, me.techs[p.k].sk, me.pos, unitAt());
+        if (!pl) return;
+        events = wantLog ? [] : null;
+        var r0 = cast(me.techs[p.k], p.k, pl);
+        if (wantLog) log.push(entry(me, me.techs[p.k].sk, p.k, r0.rolled, r0.total, events, "prebattle", 0, 0, r0.targets));
+      });
+    })();
+
     var winner = -1, order = 0, rounds = 0;
     while (turns < MAXT) {
       var A = alive(0), B = alive(1);
       if (!A.length || !B.length) { winner = A.length ? 0 : 1; break; }
       if (maxRounds > 0 && rounds >= maxRounds) { capped = true; break; }
       /* the SPD clock: earliest NextTime acts; equal times keep queue order (FIFO) */
-      var me = null;
+      me = null;
       A.concat(B).forEach(function (u) { if (!me || u.t < me.t - 1e-9 || (Math.abs(u.t - me.t) < 1e-9 && u.order < me.order)) me = u; });
       turns++; me.turns++; rounds++; me.order = ++order;
       events = wantLog ? [] : null;
@@ -667,61 +742,6 @@
       var skip = me.st.filter(function (x) { return SKIP_ACTIONS[x.meta.action]; })[0];
       var frozenCd = me.st.some(function (x) { return x.meta.cdFreeze; });
       if (!frozenCd) for (var c = 0; c < me.cd.length; c++) if (me.cd[c] > 0) me.cd[c]--;
-
-      function cast(t, slot, pl) {
-        var pick = t.sk, rolled = [], total = 0;
-        var isAttack = !pick.ec || pick.ec.skillType === "Attack" || pick.id === 0;
-        var selfish = isAlly(pick);
-        if (slot >= 0) procs(me, "skillStart", pl.primary, pl.primary);
-        var meE = eff(me, ents);
-        var rows = pick.id === 0 ? {} : (pick.r[String(t.rank)] || {});
-        var hitsCfg = (pick.ec && pick.ec.hits && pick.ec.hits.length) ? pick.ec.hits : null;
-        pl.union.forEach(function (foe) {
-          if (!foe.alive) return;
-          var foeE = eff(foe, ents);
-          var parts = hitParts(meE, foeE, pick, rows, t.level);
-          if (parts.heal) {
-            var before = foe.hp; foe.hp = Math.min(foe.s.hp, foe.hp + parts.heal * GOV);
-            if (events) events.push({ kind: "heal", who: foe.i, amount: foe.hp - before, tag: pick.name });
-          }
-          /* only the hits whose area covers this target land on it */
-          var mine = [];
-          parts.hits.forEach(function (h, hi) { var lst = pl.perHit[hitsCfg ? hi : 0]; if (!lst || lst.indexOf(foe) >= 0) mine.push({ h: h, hi: hi }); });
-          var here = 0, r0 = [];
-          if (mine.length && !selfish) { here = landHits({ hits: mine.map(function (m) { return m.h; }) }, me, foe, meE, foeE, pick, r0, t.rank, t.level); rolled = rolled.concat(r0); total += here; }
-          mine.forEach(function (m, k) {
-            if (r0.some(function (x) { return x.hi === k && x.blinded; })) return;
-            m.h.on.forEach(function (o) {
-              var meta = DATA.statuses[String(o.status)];
-              if (!meta || meta.falloff) return;
-              var tgt = (o.target === "DamageTarget" || selfish) ? foe : me;
-              if (!tgt.alive) return;
-              var chance = landChance(o.chance, o.byProp, meta.type, meE, foeE);
-              tgt.st.forEach(function (x) {
-                var bo = x.meta.boosts;
-                if (bo && bo.actions.indexOf(meta.action) >= 0 && x.meta.props) {
-                  var r = x.meta.props[String(x.rank)] || {};
-                  if (r[bo.prop]) chance += curveValue(r[bo.prop], x.rank, x.level, ents[x.creator].s.rank.name) / 100;
-                }
-              });
-              if (rng() < chance) {
-                var st = applyStatus(tgt, o.status, me, t.rank, t.level);
-                if (st && meta.shield) { var amt = shieldSize(meta, me, tgt, t.rank, t.level) * GOV; if (amt > 0) tgt.shield = Math.max(tgt.shield, amt); }
-                if (st && events) events.push({ kind: "status", who: tgt.i, name: statusName(meta) });
-              }
-            });
-          });
-          if (here > 0) { procs(me, "hit", foe, foe, function (pv) { return !(pv.onlyAttack && !isAttack); }); procs(foe, "damaged", me, me); }
-          kill(foe);
-        });
-        var bl = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
-        if (bl && isAttack) removeStatus(me, bl);
-        if (slot >= 0) {
-          me.cd[slot] = cdOf(t) + 1; me.uses[slot]++; me.techCasts++;
-          procs(me, "skillEnd", pl.primary, pl.primary, function (pv) { return me.techCasts % pv.every === 0; });
-        }
-        return { rolled: rolled, total: total, targets: pl.union.map(function (u) { return u.i; }), aim: [pl.aim.x, pl.aim.y] };
-      }
 
       var casts = 0, sub = 0;
       if (skip) {
@@ -774,7 +794,7 @@
     if (winner < 0 && turns >= MAXT) capped = true;
     function entry(me, pick, slot, rolled, total, ev, note, sub, moved, targets) {
       return { t: Math.round(me.t), who: me.i, side: me.side, slot: slot, sub: sub || 0,
-               skill: pick ? pick.name : (note === "start" ? "—" : note === "moved" ? "moved, no one in reach" : note + " — no action"),
+               skill: pick ? (note === "prebattle" ? pick.name + " (before battle)" : pick.name) : (note === "start" ? "—" : note === "moved" ? "moved, no one in reach" : note + " — no action"),
                skillId: pick ? pick.id : 0, ele: pick ? pick.ele : "None", hits: rolled, dmg: total, targets: targets || [],
                dur: pick && pick.ec && pick.ec.dur ? pick.ec.dur : 0.8, events: ev || [], turn: me.turns, note: note, moved: moved || 0,
                hp: ents.map(function (u) { return Math.max(0, u.hp); }), sh: ents.map(function (u) { return Math.round(u.shield); }),

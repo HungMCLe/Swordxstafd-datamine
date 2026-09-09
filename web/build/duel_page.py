@@ -310,6 +310,9 @@ for hard controls against a higher-ranked target, and Damp raising the odds of F
 <p><b>Charms with procs</b> now fire: on-hit skills, each-turn skills, when-hit skills (reflect), and the
 turn-with-no-Technique check that Frost Guard uses. Fear, Confusion, Ridicule and Restrict are applied and shown but
 change nothing here &mdash; taunts and movement have no meaning in a 1v1 without a grid.</p>
+<p><b>Before round 1.</b> A Technique whose card says "Casts once before battle starts"
+(<code>skill.TryAtStartType = AutoAIAtStart</code>, e.g. Heart of Challenge, Valor Surge) fires before the first
+turn, the faster fighter's first, and then sits on its cooldown like any cast.</p>
 <p><b>A turn casts every Technique that is ready.</b> Each goes in slot order and then onto its own cooldown,
 counted in that caster's turns. The engine's test is <code>Round &minus; LastRound &gt; CD</code>, so a skill with no
 cooldown fires every turn, a CD&nbsp;1 skill sits out one full turn and returns the turn after, and every skill

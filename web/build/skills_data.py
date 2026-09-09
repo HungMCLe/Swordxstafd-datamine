@@ -650,7 +650,11 @@ def main():
                     _pvp = int((_ep.get("PvpPropScale") or "10000").strip() or 10000)
                 except Exception:
                     _pvp = 10000
+                _tas = (skills.get(sk["id"]) or {}).get("TryAtStartType", "").strip()
                 duel.append({"id": sk["id"], "name": sk["name"], "cls": c["name"], "pvp": _pvp,
+                             # skill.TryAtStartType: "Casts once before battle starts" (AutoAIAtStart) or a
+                             # self-cast at the start (AutoSelfAtStart), before round 1, fastest first
+                             "startCast": {"AutoAIAtStart": "ai", "AutoSelfAtStart": "self"}.get(_tas),
                              "desc": _rt((sk.get("desc") or "").strip(), sk.get("links")),
                              "tier": t["tier"], "ele": m.group(1) if m else "Physical",
                              "hits": max(1, min(hits, 20)), "r": per,
