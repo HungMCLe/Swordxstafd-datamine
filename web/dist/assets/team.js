@@ -535,47 +535,104 @@
     }
     function unitAt() { var m = {}; ents.forEach(function (u) { m[u.pos.x + "," + u.pos.y] = u; }); return m; }
     function isAlly(sk) { var t = (sk.ec || {}).target; return t === "Me" || t === "Friend" || t === "FriendNotMe" || t === "Ally" || t === "Self"; }
-    /* the best (aim, targets) for a skill cast from `pos`, or null */
-    function plan(me, sk, pos, occ) {
+    /* a skill's geometry, precomputed: for every aim offset r (and, for a self-centred aim, every facing) the
+       cells each hit covers, all relative to the caster, plus an index from "unit offset" to the aims covering it */
+    function geo(sk) {
+      if (sk._geo) return sk._geo;
+      var ec = sk.ec || {};
+      var range = (ec.range && ec.range.length) ? ec.range : [[0, 0]];
+      var hits = (ec.hits && ec.hits.length) ? ec.hits : [{ cells: [[0, 0]], onSource: false }];
+      var entries = [], byOff = {};
+      function add(r, dir, flip, selfAim) {
+        var perHit = [], all = {};
+        hits.forEach(function (h) {
+          var set = {};
+          (h.cells && h.cells.length ? h.cells : [[0, 0]]).forEach(function (c) {
+            var w = turn(c, dir, flip);
+            var ox = (h.onSource ? 0 : r[0]) + w[0], oy = (h.onSource ? 0 : r[1]) + w[1];
+            set[ox + "," + oy] = 1; all[ox + "," + oy] = 1;
+          });
+          perHit.push(set);
+        });
+        var ei = entries.length;
+        entries.push({ r: r, dir: dir, flip: flip, selfAim: selfAim, perHit: perHit });
+        Object.keys(all).forEach(function (k) { (byOff[k] = byOff[k] || []).push(ei); });
+      }
+      range.forEach(function (r) {
+        if (r[0] === 0 && r[1] === 0) ["U", "D", "L", "R"].forEach(function (d) { add(r, d, false, true); });
+        else add(r, facing({ x: 0, y: 0 }, { x: r[0], y: r[1] }), r[0] < 0, false);
+      });
+      sk._geo = { entries: entries, byOff: byOff, hits: hits };
+      return sk._geo;
+    }
+    /* every (aim, targets) a skill can take from `pos`; the chain picks among them */
+    function plans(me, sk, pos, occ) {
       var ec = sk.ec || {};
       var selfish = isAlly(sk);
       var pool = selfish ? alliesOf(me) : enemiesOf(me);
       if (ec.target === "FriendNotMe") pool = pool.filter(function (u) { return u !== me; });
-      if (!pool.length) return null;
-      var range = (ec.range && ec.range.length) ? ec.range : [[0, 0]];
-      var hits = (ec.hits && ec.hits.length) ? ec.hits : [{ cells: [[0, 0]], onSource: false }];
+      if (!pool.length) return [];
+      var g = geo(sk);
       var taunt = me.taunt && !selfish ? me.taunt : null;
-      var best = null;
-      if (sk._reach === undefined) {          /* the farthest any area cell sits from its centre */
-        var far = 0; hits.forEach(function (h) { (h.cells || [[0, 0]]).forEach(function (c) { far = Math.max(far, Math.abs(c[0]) + Math.abs(c[1])); }); });
-        sk._reach = far;
-      }
-      var anySrc = hits.some(function (h) { return h.onSource; }), allSrc = hits.every(function (h) { return h.onSource; });
-      if (anySrc && !pool.some(function (u) { return dist(u.pos, pos) <= sk._reach; }) && allSrc) return null;
-      for (var ri = 0; ri < range.length; ri++) {
-        var ax = pos.x + range[ri][0], ay = pos.y + range[ri][1];
-        if (ax < 0 || ay < 0 || ax >= GRID.w || ay >= GRID.h) continue;
-        var aim = { x: ax, y: ay };
-        if (!anySrc) { var near = false; for (var pi = 0; pi < pool.length; pi++) if (Math.abs(pool[pi].pos.x - ax) + Math.abs(pool[pi].pos.y - ay) <= sk._reach) { near = true; break; } if (!near) continue; }
-        var dir = (ax === pos.x && ay === pos.y) ? facing(pos, (taunt || nearest(me, pool) || me).pos) : facing(pos, aim);
-        var flip = ax < pos.x;
+      var offs = pool.map(function (u) { return (u.pos.x - pos.x) + "," + (u.pos.y - pos.y); });
+      var cand = {};
+      offs.forEach(function (k) { (g.byOff[k] || []).forEach(function (ei) { cand[ei] = 1; }); });
+      var selfDir = null;
+      var out = [];
+      Object.keys(cand).forEach(function (ei) {
+        var e = g.entries[ei];
+        if (e.selfAim) {
+          if (selfDir === null) selfDir = facing(pos, (taunt || nearest(me, pool) || me).pos);
+          if (e.dir !== selfDir) return;
+        }
+        var ax = pos.x + e.r[0], ay = pos.y + e.r[1];
+        if (ax < 0 || ay < 0 || ax >= GRID.w || ay >= GRID.h) return;
         var perHit = [], seen = {}, union = [];
-        for (var hi = 0; hi < hits.length; hi++) {
-          var h = hits[hi], centre = h.onSource ? pos : aim, list = [];
-          var cells = (h.cells && h.cells.length) ? h.cells : [[0, 0]];
-          for (var ci = 0; ci < cells.length; ci++) {
-            var w = turn(cells[ci], dir, flip);
-            var u = occ[(centre.x + w[0]) + "," + (centre.y + w[1])];
-            if (u && u.alive && pool.indexOf(u) >= 0 && list.indexOf(u) < 0) { list.push(u); if (!seen[u.i]) { seen[u.i] = 1; union.push(u); } }
+        for (var hi = 0; hi < e.perHit.length; hi++) {
+          var set = e.perHit[hi], list = [];
+          for (var pi = 0; pi < pool.length; pi++) {
+            if (set[offs[pi]]) { var u = pool[pi]; list.push(u); if (!seen[u.i]) { seen[u.i] = 1; union.push(u); } }
           }
           perHit.push(list);
         }
-        if (!union.length) continue;
-        if (taunt && union.indexOf(taunt) < 0) continue;          /* under Ridicule every attack goes at the taunter */
-        var lowest = Math.min.apply(null, union.map(function (u) { return u.hp / u.s.hp; }));
-        var score = [union.length, -lowest, -dist(pos, aim)];
-        if (!best || better(score, best.score)) best = { aim: aim, dir: dir, perHit: perHit, union: union, score: score, primary: union.slice().sort(function (a, b) { return a.hp / a.s.hp - b.hp / b.s.hp; })[0] };
+        if (!union.length) return;
+        if (taunt && union.indexOf(taunt) < 0) return;          /* under Ridicule every attack goes at the taunter */
+        out.push({ aim: { x: ax, y: ay }, dir: e.dir, perHit: perHit, union: union, onUnit: !!occ[ax + "," + ay],
+                   primary: union.slice().sort(function (x, y) { return x.hp / x.s.hp - y.hp / y.s.hp; })[0] });
+      });
+      return out;
+    }
+    /* AiPriorityType, as the client defines it: a skill's own AiPriorityTypes / LastAIPriorityTypes when it has
+       them; otherwise the chain the designers wrote out on the skills that do carry one (the true default is
+       server-side). DontKeepDistance means the last cast uses the ordinary chain instead of the "last" one. */
+    var DEFAULT_CHAIN = ["PriorGameCharacterType", "BiggerBodyRange", "MoreHitStatusCount", "MoreHitCount", "ShorterMoveDist", "LowerTargetHp", "ShorterEnemyTargetPosDistAndSameDir", "PriorTargetEntityPos"];
+    var DEFAULT_LAST = ["PriorGameCharacterType", "BiggerBodyRange", "MoreHitStatusCount", "MoreHitCount", "SaferPos", "LowerTargetHp", "ShorterEnemyTargetPosDistAndSameDir", "PriorTargetEntityPos"];
+    function chainOf(sk, last) {
+      var ec = sk.ec || {};
+      if (last && !ec.dontKeepDistance) return (ec.aiLast && ec.aiLast.length) ? ec.aiLast : DEFAULT_LAST;
+      return (ec.aiPriority && ec.aiPriority.length) ? ec.aiPriority : DEFAULT_CHAIN;
+    }
+    /* one criterion, scored "bigger is better" by its name; criteria about body size, character type and
+       MoreHit-flagged statuses are all zero here because every player is one cell and no status carries the flag */
+    function scoreOf(chain, me, cell, pl) {
+      var enemies = enemiesOf(me), v = [];
+      for (var i = 0; i < chain.length; i++) {
+        var k = chain[i], x = 0;
+        if (k === "MoreHitCount") x = pl.union.length;
+        else if (k === "ShorterMoveDist" || k === "LeastMoveNearTarget") x = -cell.d;
+        else if (k === "LowerTargetHp") x = -Math.min.apply(null, pl.union.map(function (u) { return u.hp / u.s.hp; }));
+        else if (k === "ShorterTargetDist" || k === "ShorterMovedTargetDist" || k === "ShorterEnemyTargetPosDistAndSameDir") x = -dist(cell, pl.aim);
+        else if (k === "SaferPos") x = enemies.length ? Math.min.apply(null, enemies.map(function (u) { return dist(cell, u.pos); })) : 0;
+        else if (k === "PriorTargetEntityPos") x = pl.onUnit ? 1 : 0;
+        else if (k === "PriorCloserTeammate") { var mates = alliesOf(me).filter(function (u) { return u !== me; }); x = mates.length ? -Math.min.apply(null, mates.map(function (u) { return dist(cell, u.pos); })) : 0; }
+        else if (k === "PriorRandom") x = rng();
+        v.push(x);
       }
+      return v;
+    }
+    function plan(me, sk, pos, occ, last) {
+      var all = plans(me, sk, pos, occ), chain = chainOf(sk, last), best = null, cell = { x: pos.x, y: pos.y, d: 0 };
+      all.forEach(function (pl) { var sc = scoreOf(chain, me, cell, pl); if (!best || better(sc, best.score)) { best = pl; best.score = sc; } });
       return best;
     }
     function better(a, b) { for (var i = 0; i < a.length; i++) { if (a[i] > b[i]) return true; if (a[i] < b[i]) return false; } return false; }
@@ -598,24 +655,39 @@
       }
       return out;
     }
-    /* the plan for `sk`: from where the fighter stands if anything is in reach, else from the nearest cell it
-       can walk to that puts something in reach (ShorterMoveDist), the most targets among cells at that distance */
-    function planWithMove(me, sk, reach, occ) {
-      var here = reach[me.pos.x + "," + me.pos.y];
-      var p0 = plan(me, sk, me.pos, occ);
-      if (p0) return { plan: p0, cell: here, score: p0.score };
-      var cells = Object.keys(reach).map(function (k) { return reach[k]; }).filter(function (c) { return c.d > 0; }).sort(function (a, b) { return a.d - b.d; });
-      var best = null, occ2 = {};
+    /* the offsets, relative to the caster, at which some aim of `sk` covers a unit (its footprint) */
+    function footprint(sk) { return geo(sk).byOff; }
+    /* the AI's joint choice of where to stand and what to aim at, over every cell in walking reach
+       (SkillAiCfg.IsReleaseSkillAfterMove); candidates are pruned by how many units their footprint can cover */
+    function planWithMove(me, sk, reach, occ, last) {
+      var chain = chainOf(sk, last), selfish = isAlly(sk);
+      var pool = selfish ? alliesOf(me) : enemiesOf(me);
+      if (!pool.length) return null;
+      var fp = footprint(sk);
+      var cells = Object.keys(reach).map(function (k) { return reach[k]; });
+      var cand = [];
+      cells.forEach(function (c) {
+        var n = 0;
+        for (var i = 0; i < pool.length; i++) { var u = pool[i]; if (u === me || fp[(u.pos.x - c.x) + "," + (u.pos.y - c.y)]) n++; }
+        if (n) cand.push({ c: c, n: n });
+      });
+      if (!cand.length) return null;
+      cand.sort(function (x, y) { return (y.n - x.n) || (x.c.d - y.c.d); });
+      var occ2 = {};
       Object.keys(occ).forEach(function (x) { occ2[x] = occ[x]; });
       delete occ2[me.pos.x + "," + me.pos.y];
-      for (var i = 0; i < cells.length; i++) {
-        var c = cells[i];
-        if (best && c.d > best.cell.d) break;
-        var k = c.x + "," + c.y;
-        occ2[k] = me;
-        var p = plan(me, sk, c, occ2);
-        delete occ2[k];
-        if (p && (!best || better(p.score, best.plan.score))) best = { plan: p, cell: c, score: p.score };
+      var best = null, bestHits = 0, moreHitsFirst = chain[0] === "MoreHitCount";
+      for (var i = 0; i < cand.length; i++) {
+        var c = cand[i].c;
+        if (moreHitsFirst && best && cand[i].n < bestHits) break;        /* no cell left can beat the best */
+        var k = c.x + "," + c.y, saved = me.pos;
+        occ2[k] = me; me.pos = { x: c.x, y: c.y };
+        var all = plans(me, sk, c, occ2);
+        me.pos = saved; delete occ2[k];
+        for (var j = 0; j < all.length; j++) {
+          var sc = scoreOf(chain, me, c, all[j]);
+          if (!best || better(sc, best.score)) { best = { plan: all[j], cell: c, score: sc }; best.plan.score = sc; bestHits = all[j].union.length; }
+        }
       }
       return best;
     }
@@ -707,11 +779,14 @@
         me = p.u;
         if (!me.alive || !enemiesOf(me).length) return;
         me.taunt = null;
-        var pl = plan(me, me.techs[p.k].sk, me.pos, unitAt());
-        if (!pl) return;
+        me.st.forEach(function (x) { if (x.meta.action === "Ridicule" && ents[x.creator].alive && ents[x.creator].side !== me.side) me.taunt = ents[x.creator]; });
         events = wantLog ? [] : null;
-        var r0 = cast(me.techs[p.k], p.k, pl);
-        if (wantLog) log.push(entry(me, me.techs[p.k].sk, p.k, r0.rolled, r0.total, events, "prebattle", 0, 0, r0.targets));
+        var pm = planWithMove(me, me.techs[p.k].sk, reachable(me, me.s.move || GRID.defaultMove), unitAt());
+        var moved0 = 0;
+        if (!pm) return;
+        if (pm.cell.d > 0) { moved0 = walkTo(me, pm.cell); if (events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] }); }
+        var r0 = cast(me.techs[p.k], p.k, pm.plan);
+        if (wantLog) log.push(entry(me, me.techs[p.k].sk, p.k, r0.rolled, r0.total, events, "prebattle", 0, moved0, r0.targets));
       });
     })();
 
@@ -748,18 +823,22 @@
         if (wantLog) log.push(entry(me, null, -1, [], 0, events, skip.meta.action, 0, moved));
       } else {
         var reach = reachable(me, me.s.move || GRID.defaultMove), occ = unitAt();
-        for (var k = 0; k < me.techs.length && me.alive; k++) {
-          var cand = me.techs[k];
-          if (!cand || me.cd[k] !== 0) continue;
+        var ready = [];
+        me.techs.forEach(function (t, k) {
+          if (!t || me.cd[k] !== 0) return;
+          var lim = t.sk.ec ? t.sk.ec.limitedTimes : -1;
+          if (lim > 0 && me.uses[k] >= lim) return;
+          ready.push(k);
+        });
+        for (var ri = 0; ri < ready.length && me.alive; ri++) {
+          var k = ready[ri], cand = me.techs[k], last = ri === ready.length - 1;
           if (!enemiesOf(me).length) break;
-          var lim = cand.sk.ec ? cand.sk.ec.limitedTimes : -1;
-          if (lim > 0 && me.uses[k] >= lim) continue;
           var pl;
-          if (moved) pl = plan(me, cand.sk, me.pos, occ);
+          if (moved) pl = plan(me, cand.sk, me.pos, occ, last);
           else {
-            var pm = planWithMove(me, cand.sk, reach, occ);
+            var pm = planWithMove(me, cand.sk, reach, occ, last);
             if (pm && pm.cell.d > 0) {
-              /* out of reach where it stands: move up to MoveDist, then cast (IsReleaseSkillAfterMove) */
+              /* out of place for this cast: walk up to MoveDist, then cast (IsReleaseSkillAfterMove) */
               moved = walkTo(me, pm.cell); occ = unitAt();
               if (events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] });
             }

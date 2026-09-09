@@ -51,14 +51,19 @@ it covers around that aim point, or around the caster when the hit acts on its s
 aim, as <code>CalcLocalToWorldDir</code> does. Heart of Challenge, for instance, has no reach of its own but
 covers every cell within three of the Paladin; Howling Hurricane reaches five cells away and covers a
 two-cell diamond there.</p>
-<p><b>A turn is move, then cast.</b> Whoever comes due next on the SPD clock acts (equal times keep queue
-order). It casts every ready Technique in slot order, each onto its own cooldown counted in that fighter's turns.
-If the first ready Technique has no target where the fighter stands, it walks up to its Move stat
-(<code>MoveDist</code>, 4 for every player captured so far) through free cells, four ways, then casts
-(<code>IsReleaseSkillAfterMove</code>); the destination is the one that hits the most targets, closest first. The
-aim among candidates follows the AI's ordering: more targets hit, then the lowest HP. A basic attack on an
-adjacent enemy happens when nothing is ready, and a fighter with nothing in reach at all walks toward the
-nearest enemy. A fallen player keeps its cell (<code>DestroyOnDie = false</code>), so bodies block paths.</p>
+<p><b>A turn is move, then cast; the choice follows the client's own AI lists.</b> Whoever comes due next on
+the SPD clock acts (equal times keep queue order) and casts every ready Technique in slot order, each onto its
+own cooldown counted in that fighter's turns. For each cast the fighter weighs every cell it can walk to
+(up to <code>MoveDist</code>, four ways, through free cells) together with every aim the skill allows from
+there, and ranks them by the skill's <code>AiPriorityTypes</code> list, criterion by criterion: most targets
+hit, then the shorter walk, then the lowest-HP target, then the nearer aim, then an aim that sits on a unit.
+Skills with no list of their own use the chain the designers wrote out on the skills that carry one; the
+server's true default is not in the client. The last cast of a turn uses <code>LastAIPriorityTypes</code>,
+which swaps "shorter walk" for "safer cell" (farther from every enemy), unless the skill is flagged
+<code>DontKeepDistance</code>. Walking happens once per turn, before the cast that needs it
+(<code>IsReleaseSkillAfterMove</code>); that single walk is this page's one assumption. A basic attack on an
+adjacent enemy happens when nothing is ready, and a fighter with nothing in reach walks toward the nearest
+enemy. A fallen player keeps its cell (<code>DestroyOnDie = false</code>), so bodies block paths.</p>
 <p><b>Before round 1, and then speed.</b> A Technique marked "Casts once before battle starts"
 (<code>skill.TryAtStartType = AutoAIAtStart</code>: Heart of Challenge, Valor Surge, Gale Dance, Void Blessing)
 fires before the first turn, fastest fighter first, from where it stands, and then sits on its cooldown. A taunt
@@ -67,8 +72,9 @@ each of them must aim at the taunter, walking to it if needed; a fast Paladin th
 Every other skill with a cooldown opens the fight on it unless it is a Zero Initial CD skill.</p>
 <p><b>Not modelled.</b> Fantomon ride along off the clock and are untargetable in the real fight; their
 triggered skills are not run here. The end-of-fight rule at the 100-round cap is server-side and unknown, so
-a capped fight is scored by remaining HP. The AI's exact tie-breaks beyond "most hits, lowest HP, nearest"
-are server-side too.</p>
+a capped fight is scored by remaining HP. The AI's scoring loop is server-side: the criteria and each
+skill's ordering are the client's, their default ordering and the global weights in
+<code>BattleAISetting</code> (preferred distance to teammates, bunching penalty) are not modelled.</p>
 """
 
 
