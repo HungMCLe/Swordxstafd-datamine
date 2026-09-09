@@ -77,10 +77,17 @@ Threads) land on the nearest free cell in the client's ring order when the exact
 Immobilized or Super Armor unit is not moved.</p>
 <p><b>Damage, hit by hit.</b> Every hit runs the client's <code>Damage()</code>: attack times the skill's
 coefficient over the target's per-rank PvP scaler, plus the flat term, times ATK/(ATK+DEF), times the elemental
-ratio, times the percent block, over the class scaler, times the skill's <code>PvpPropScale</code>. Block is
-rolled first and a blocked hit cannot crit (<code>CalcDamageTypeImpl</code>): the chances add the flat value
-forms over their per-rank bases (Crit Rate + Crit Rate Value / base, Block Rate + Block Value / base, and the
-attacker's Accuracy against both), a crit multiplies by at least 1.3, a block divides by at least 1.5. Heals
+ratio, times the percent block, over the class scaler, times the skill's <code>PvpPropScale</code>. The elemental
+ratio is the client's split: the attacker's Affinity is divided by the <i>target's</i> base Elemental DMG RES and
+its Mastery by the target's base Elemental RES, while the target's Elemental RES is divided by the
+<i>attacker's</i> bases. A further stage multiplies by (1 + the attacker's Status DMG Bonus + the target's Status
+DMG Taken) over (1 + the target's Status DMG RES), which is how Curse Resonance and its kin pay out.
+Every hit rolls in the client's order (<code>CalcDamageTypeImpl</code>): the attacker's Blind chance, then the
+target's Dodge, then block, then crit &mdash; a blinded or dodged hit deals nothing and applies no status, and a
+blocked hit cannot crit. The chances add the flat value forms over their per-rank bases (Crit Rate + Crit Rate
+Value / base, Block Rate + Block Value / base, and the attacker's Accuracy against both), a crit multiplies by at
+least 1.3, a block divides by at least 1.5. Blind is a chance, not a certainty: the status grants its holder a 50%
+Blind chance for one Technique, so half its hits still land. Heals
 run <code>Cure()</code>: max HP, attack or the target's max HP times the skill's cure coefficient plus the fixed
 cure, times (1 + Healing Boost + Healing Received + their value forms over their bases), times the final cure scale.
 The PvP governor (<code>PVPSkillPropsScaleOnBattleProcessor</code>, shown under the odds) scales only the damage
@@ -114,11 +121,23 @@ destination, so cells crossed mid-path do not fire; the client's step-by-step pa
 <code>Play</code>, during which the AI is driven on a fixed interval (<code>Battle.DrivePlayStartAIInterval</code>),
 and the skill table marks what fires then (<code>skill.TryAtStartType</code>: Heart of Challenge, Valor Surge,
 Gale Dance, Void Blessing are "Casts once before battle starts"; the self-cast Charm effects such as Rapid Cast are
-<code>AutoSelfAtStart</code>). The order among fighters is server-side; what real fights show, and what this page
-does, is that every fighter fires its next start skill on each tick, the faster fighter first within the tick, so
-both sides' opening buffs land before the faster tank's taunt. A taunt such as Heart of Challenge lands
-<i>Ridicule</i> on every enemy within three cells, and for as long as that lasts each of them must aim at the
-taunter, walking to it if needed. Every other skill with a cooldown opens the fight on it unless it is a Zero
+<code>AutoSelfAtStart</code>). The game's own note on this phase reads: "When multiple units on both sides are set
+to cast skills before battle starts, they cast them from highest to lowest initial SPD. SPD changes during this
+phase do not affect the order. If a character has multiple skills to cast before battle starts, Charms are cast
+before Techniques. Skills of the same type are cast in loadout order, from top to bottom. Battle starts after all
+such skills from both sides have been cast." This page orders by initial SPD and never re-sorts, as that says. It
+also interleaves: every fighter fires its next start skill on each tick, the faster fighter first within the tick,
+so both sides' opening buffs land before the faster tank's taunt &mdash; which is what real fights showed, though
+the note read strictly would let the fastest fighter cast all of its own start skills first. The three self-cast
+Charms in this data (Rapid Cast, Iron Fortress, Gale Shield) act through their round-start hooks instead. A taunt such as Heart of Challenge lands
+<i>Ridicule</i> on every enemy within three cells. The game states what that does: "Taunted enemies target the
+caster only, and approach the caster when using damaging Techniques. Summoning Techniques remain available, but
+ally-targeting Techniques (grant buffs, healing, shields, etc.) are disabled while taunted." So a taunted fighter
+here aims only at its taunter, cannot cast a buff, heal or shield on itself or an ally until the taunt ends or the
+taunter falls, and never uses the keep-distance ordering for a damaging Technique &mdash; it closes on the taunter
+to break ties. Its skill's own priorities still come first, so it will step sideways to catch more targets; where
+"approach" sits among those priorities is server-side, and this page puts it last. Every other skill with a
+cooldown opens the fight on it unless it is a Zero
 Initial CD skill. Control comes from the client's <code>state_mutex</code> table: Stun, Frozen and Phoenix Stasis
 discard both move and skill, Restrict and Immobilize discard the move only.</p>
 <p><b>Not modelled.</b> Creature summons (Waterling Summon, Frenzy Totem, Stonechief Summon): the cast is logged

@@ -52,7 +52,11 @@
     CritRatePercent: "cr", CritPowerPercent: "cd", CritAvoidPercent: "critres",
     DmgAddPercent: "boost", DmgReducePercent: "dmgres", BlockPercent: "blockrate", BlockValuePercent: "blockeff",
     BlockAvoidPercent: "blockavoid", FinalDamageReducePercent: "dmgres", EffectRate: "erate", EffectDodge: "edodge",
-    StatusDmgAddPer: "boost", StatusDmgReducePer: "dmgres", DmgVulnerable: "vuln", StatusDmgVulnerablePer: "vuln",
+    /* Damage() applies these three on their own stage, not inside the DmgAddPercent block */
+    StatusDmgAddPer: "sadd", StatusDmgReducePer: "sred", StatusDmgVulnerablePer: "svuln",
+    DmgVulnerable: "vuln",
+    /* CalcDamageTypeImpl rolls the target's DodgePercent and the attacker's BlindingPercent per hit */
+    DodgePercent: "dodge", BlindingPercent: "blind",
     CureAddPercent: "cureadd"
   };
   var PROP2ELE = {};
@@ -67,7 +71,7 @@
   var PROP2FLAT = { FixedStatusDmgAdd: "fadd", FixedDmgAdd: "fadd", DmgAdd: "fadd",
                     FixedStatusDmgReduce: "fred", FixedDmgReduce: "fred", DmgReduce: "fred",
                     FixedDmgVulnerable: "fvuln", FixedstatusDmgVulnerable: "fvuln" };
-  var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "blockavoid", "pvpadd", "pvpres", "cureadd", "becureadd", "finalcure", "dodge", "vuln"];
+  var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "blockavoid", "pvpadd", "pvpres", "cureadd", "becureadd", "finalcure", "dodge", "blind", "vuln", "sadd", "sred", "svuln"];
 
   /* fold one prop row (a status's numbers) into a working sheet, in percent units */
   function foldProps(e, row, srank, slevel, rank) {
@@ -152,6 +156,8 @@
     var eNum = 1 + aff / def.rank.BaseElementReduce + mast / foeMasterBase;
     var eDen = 1 + (elemental ? (def.aegis[ele] || 0) / att.rank.BaseElementAdd : 0) + res / myMasterBase;
     var pct = (1 + att.boost + (att.pvpadd || 0) + def.vuln) / Math.max(0.1, 1 + def.dmgres + (def.pvpres || 0));
+    /* Damage(): num2 *= 1 + StatusDmgAddPer(src) + StatusDmgVulnerablePer(tgt); num2 /= max(0.1, 1 + StatusDmgReducePer(tgt)) */
+    pct *= (1 + (att.sadd || 0) + (def.svuln || 0)) / Math.max(0.1, 1 + (def.sred || 0));
     var defTerm = att.atk / (att.atk + def.def);
     var psdr = 1 + (def.rank.PlayerSkillDmgReduceScale || 0) / 10000;
     var prosdr = 1 + (def.rank.ProSkillDmgReduceScale || 0) / 10000;
@@ -766,13 +772,15 @@
       var p = critChance(meE, foeE), m = critMult(meE, foeE);
       var b = blockChance(meE, foeE), bd = blockDiv(meE, foeE);
       var total = 0, fallCount = fall ? (fall[foe.i] || 0) : 0;
-      var blind = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
+      /* CalcDamageTypeImpl: IsBlinding rolls the attacker's own BlindingPercent (the Blind status grants it),
+         IsDodge rolls the target's DodgePercent; Damage() returns 0 for either */
+      var blindPct = meE.blind || 0, dodgePct = foeE.dodge || 0;
       var gov = pick.gov === false ? 1 : GOV;
       var shielded = hasShield(foe);
       var isAttack = !pick.ec || !pick.ec.skillType || pick.ec.skillType === "Attack";
       parts.hits.forEach(function (h, hi) {
         if (!foe.alive || !(h.d > 0)) return;
-        var d = h.d * gov, crit = false, block = false, absorbed = 0, blinded = false;
+        var d = h.d * gov, crit = false, block = false, absorbed = 0, blinded = false, dodged = false;
         var fo = null;
         h.on.forEach(function (o) { var mt = DATA.statuses[String(o.status)]; if (mt && mt.falloff) fo = mt.falloff; });
         if (fo) {
@@ -782,7 +790,8 @@
           d *= Math.pow(1 - fo.pct, steps);
           fallCount++;
         }
-        if (blind && pick.ec && pick.ec.skillType === "Attack") { d = 0; blinded = true; }
+        if (blindPct > 0 && rng() < blindPct) { d = 0; blinded = true; }
+        else if (dodgePct > 0 && rng() < dodgePct) { d = 0; dodged = true; }
         else if (rng() < b) { d /= bd; block = true; }
         else if (rng() < p) { d *= m; crit = true; }
         if (foe.shield > 0 && !h.ignoreShield && d > 0) {
@@ -792,7 +801,7 @@
         var saved = null;
         if (d > 0 && d >= foe.hp) { saved = deathSave(foe); if (saved) d = Math.max(0, foe.hp - saved.limit); }
         foe.hp -= d; total += d;
-        if (rolled) rolled.push({ d: d, crit: crit, block: block, absorbed: absorbed, blinded: blinded, at: h.at || 0, saved: !!saved, who: foe.i, hi: hi });
+        if (rolled) rolled.push({ d: d, crit: crit, block: block, absorbed: absorbed, blinded: blinded, dodged: dodged, at: h.at || 0, saved: !!saved, who: foe.i, hi: hi });
         if (saved) {
           if (events) events.push({ kind: "save", who: foe.i, tag: saved.ch.name });
           if (saved.heal > 0) heal(foe, saved.heal, saved.ch.name);
@@ -800,7 +809,7 @@
         } else if (d > 0) afterDamage(foe, me);
         if (pick.noHooks || hookDepth >= 4) return;      /* the skill's CanTriggerChild is off, or a hook chain runs too deep */
         hookDepth++;
-        var ev = { d: d, absorbed: absorbed, block: block, crit: crit, blinded: blinded, ele: pick.ele || "None", skillId: pick.id, isAttack: isAttack };
+        var ev = { d: d, absorbed: absorbed, block: block, crit: crit, blinded: blinded, dodged: dodged, ele: pick.ele || "None", skillId: pick.id, isAttack: isAttack };
         /* the attacker's on-hit Charms (Radiant Sear, Blade of Judgment, Shadow Erosion, ...) */
         if (me.alive) procs(me, "hit", foe, foe, function (pv) { return hitMatch(pv, ev, me, foe); });
         /* the victim's on-damaged Charms (Rebound on a block, Counter Blade, Eye for an Eye, ...) */
@@ -931,8 +940,16 @@
     }
     var DEFAULT_CHAIN = ["PriorGameCharacterType", "BiggerBodyRange", "MoreHitStatusCount", "MoreHitCount", "ShorterMoveDist", "LowerTargetHp", "ShorterEnemyTargetPosDistAndSameDir", "PriorTargetEntityPos"];
     var DEFAULT_LAST = ["PriorGameCharacterType", "BiggerBodyRange", "MoreHitStatusCount", "MoreHitCount", "SaferPos", "LowerTargetHp", "ShorterEnemyTargetPosDistAndSameDir", "PriorTargetEntityPos"];
-    function chainOf(sk, last) {
+    function isSummon(sk) { return ((sk.ec && sk.ec.hits) || []).some(function (h) { return h.summon; }); }
+    function isDamaging(sk) { var t = (sk.ec || {}).skillType; return (!t || t === "Attack") && !isAlly(sk); }
+    /* taunt: "Taunted enemies ... approach the caster when using damaging Techniques", so a taunted
+       fighter never picks the keep-distance ordering for one, and closes on the taunter to break ties */
+    function chainOf(sk, last, taunted) {
       var ec = sk.ec || {};
+      if (taunted && isDamaging(sk)) {
+        var base = (ec.aiPriority && ec.aiPriority.length) ? ec.aiPriority : DEFAULT_CHAIN;
+        return base.filter(function (k) { return k !== "SaferPos"; }).concat(["ApproachRidiculer"]);
+      }
       if (last && !ec.dontKeepDistance) return (ec.aiLast && ec.aiLast.length) ? ec.aiLast : DEFAULT_LAST;
       return (ec.aiPriority && ec.aiPriority.length) ? ec.aiPriority : DEFAULT_CHAIN;
     }
@@ -945,6 +962,7 @@
         else if (k === "LowerTargetHp") x = -Math.min.apply(null, pl.union.map(function (u) { return u.hp / u.s.hp; }));
         else if (k === "ShorterTargetDist" || k === "ShorterMovedTargetDist" || k === "ShorterEnemyTargetPosDistAndSameDir") x = -dist(cell, pl.aim);
         else if (k === "SaferPos") x = enemies.length ? Math.min.apply(null, enemies.map(function (u) { return dist(cell, u.pos); })) : 0;
+        else if (k === "ApproachRidiculer") x = me.taunt ? -dist(cell, me.taunt.pos) : 0;
         else if (k === "PriorTargetEntityPos") x = pl.onUnit ? 1 : 0;
         else if (k === "PriorCloserTeammate") { var mates = alliesOf(me).filter(function (u) { return u !== me; }); x = mates.length ? -Math.min.apply(null, mates.map(function (u) { return dist(cell, u.pos); })) : 0; }
         else if (k === "PriorRandom") x = rng();
@@ -954,7 +972,7 @@
     }
     function better(a, b) { for (var i = 0; i < a.length; i++) { if (a[i] > b[i]) return true; if (a[i] < b[i]) return false; } return false; }
     function plan(me, sk, pos, occ, last) {
-      var all = plans(me, sk, pos, occ), chain = chainOf(sk, last), best = null, cell = { x: pos.x, y: pos.y, d: 0 };
+      var all = plans(me, sk, pos, occ), chain = chainOf(sk, last, !!me.taunt), best = null, cell = { x: pos.x, y: pos.y, d: 0 };
       all.forEach(function (pl) { var sc = scoreOf(chain, me, cell, pl); if (!best || better(sc, best.score)) { best = pl; best.score = sc; } });
       return best;
     }
@@ -977,7 +995,7 @@
       return out;
     }
     function planWithMove(u, sk, reach, occ, last) {
-      var chain = chainOf(sk, last);
+      var chain = chainOf(sk, last, !!u.taunt);
       var pool = poolFor(u, sk);
       if (!pool.length) return null;
       var fp = geo(sk).byOff;
@@ -1064,7 +1082,7 @@
         if (partsCache[foe.i]) return partsCache[foe.i];
         var foeE = eff(foe, ents), mE = meE;
         var extra = boostFor(foe);
-        if (extra) { mE = {}; Object.keys(meE).forEach(function (k) { mE[k] = meE[k]; }); mE.boost = (meE.boost || 0) + extra; }
+        if (extra) { mE = {}; Object.keys(meE).forEach(function (k) { mE[k] = meE[k]; }); mE.sadd = (meE.sadd || 0) + extra; }
         return partsCache[foe.i] = { E: foeE, mE: mE, parts: hitParts(mE, foeE, pick, rows, t.level) };
       }
       var hitTargets = {};      /* hit index -> units it damaged (for child skills) */
@@ -1078,7 +1096,7 @@
           r0.forEach(function (x) { x.hi = hi; rolled.push(x); });
           total += here;
         }
-        var blindedHit = rolled.some(function (x) { return x.hi === hi && x.who === foe.i && x.blinded; });
+        var blindedHit = rolled.some(function (x) { return x.hi === hi && x.who === foe.i && (x.blinded || x.dodged); });
         if (!blindedHit) h.on.forEach(function (o) {
           var meta = DATA.statuses[String(o.status)];
           if (!meta || meta.falloff) return;
@@ -1261,6 +1279,9 @@
           if (!t || me.cd[k] !== 0) return;
           var lim = t.sk.ec ? t.sk.ec.limitedTimes : -1;
           if (lim > 0 && me.uses[k] >= lim) return;
+          /* "ally-targeting Techniques (grant buffs, healing, shields, etc.) are disabled while taunted";
+             "Summoning Techniques remain available" */
+          if (me.taunt && isAlly(t.sk) && !isSummon(t.sk)) return;
           ready.push(k);
         });
         for (var ri = 0; ri < ready.length && me.alive; ri++) {
@@ -1652,7 +1673,7 @@
     fillTable(R.sample);
     seekTo(0);
   }
-  function hitText(h) { return (h.blinded ? "blind" : short(h.d)) + (h.crit ? " crit" : "") + (h.block ? " blocked" : "") + (h.absorbed ? " (−" + short(h.absorbed) + " shield)" : ""); }
+  function hitText(h) { return (h.blinded ? "blind" : h.dodged ? "dodge" : short(h.d)) + (h.crit ? " crit" : "") + (h.block ? " blocked" : "") + (h.absorbed ? " (−" + short(h.absorbed) + " shield)" : ""); }
   function fillTable(sample) {
     var F = fightersFlat();
     $("logbody").innerHTML = sample.log.map(function (l) {
@@ -1689,7 +1710,7 @@
     var F = fightersFlat();
     $("combatlog").innerHTML = sample.log.map(function (l, k) {
       var tg = (l.targets || []).map(function (i) { return esc(F[i].name); }).join(", ");
-      var hits = l.hits.map(function (h) { return (h.blinded ? "blind" : short(h.d)) + (h.crit ? "!" : "") + (h.block ? " blk" : ""); }).join(" ");
+      var hits = l.hits.map(function (h) { return (h.blinded ? "blind" : h.dodged ? "dodge" : short(h.d)) + (h.crit ? "!" : "") + (h.block ? " blk" : ""); }).join(" ");
       var ev = l.events.map(function (e) { return eventText(F, e); }).filter(Boolean).join("; ");
       return '<li class="s' + l.side + ' future" data-k="' + (k + 1) + '"><span class="tlk">' + (l.turn === 0 ? "pre" : "t" + l.turn) + '</span> <b>' + esc(F[l.who].name) + "</b> " + esc(l.skill) + (l.moved ? " <span class=hint>(moved " + l.moved + ")</span>" : "") + (tg ? " → " + tg : "") + (hits ? " <span class=hits>" + hits + "</span>" : "") + (l.dmg ? " = " + short(l.dmg) : "") + (ev ? "<br><span class=hint>" + ev + "</span>" : "") + "</li>";
     }).join("");

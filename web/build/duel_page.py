@@ -305,7 +305,11 @@ and each status entity says what it is. The fight now runs them: <b>stat buffs a
 clears); <b>shields</b> that absorb before HP; <b>poison</b> and other round-start ticks; and expiry triggers, which
 is how Icebound heals when it ends. Durations count the <i>holder's</i> own turns. Landing rolls use
 <code>EffectRate()</code>: base chance x (1 + Effect Hit Rate / base) / (1 + Effect RES / base), cubed-ratio penalty
-for hard controls against a higher-ranked target, and Damp raising the odds of Frozen.</p>
+for hard controls against a higher-ranked target, and Damp raising the odds of Frozen. Every hit rolls in the
+client's order: the attacker's Blind chance, then the target's Dodge, then block, then crit. Blind is a chance
+rather than a certainty &mdash; the status grants a 50% Blind chance for one Technique &mdash; and a dodged or
+blinded hit deals nothing and applies no status. Status DMG Bonus, Status DMG Taken and Status DMG RES form their
+own multiplicative stage, as <code>Damage()</code> applies them.</p>
 <p><b>Charms with procs</b> now fire: on-hit skills, each-turn skills, when-hit skills (reflect), and the
 turn-with-no-Technique check that Frost Guard uses. Fear, Confusion, Ridicule and Restrict are applied and shown but
 change nothing here &mdash; taunts and movement have no meaning in a 1v1 without a grid.</p>
