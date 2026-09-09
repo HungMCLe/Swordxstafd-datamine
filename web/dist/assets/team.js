@@ -775,22 +775,31 @@
     /* "Casts once before battle starts": AutoAIAtStart / AutoSelfAtStart Techniques fire before round 1 in speed
        order (FightAIPlayStartComponent), aimed from where each fighter stands, then sit on their cooldown */
     (function preBattle() {
-      var pre = [];
-      ents.forEach(function (u) { u.techs.forEach(function (t, k) { if (t && t.sk.startCast) pre.push({ u: u, k: k }); }); });
-      pre.sort(function (x, y) { return (x.u.t - y.u.t) || (x.u.i - y.u.i); });
-      pre.forEach(function (p) {
-        me = p.u;
-        if (!me.alive || !enemiesOf(me).length) return;
-        me.taunt = null;
-        me.st.forEach(function (x) { if (x.meta.action === "Ridicule" && ents[x.creator].alive && ents[x.creator].side !== me.side) me.taunt = ents[x.creator]; });
-        events = wantLog ? [] : null;
-        var pm = planWithMove(me, me.techs[p.k].sk, reachable(me, me.s.move || GRID.defaultMove), unitAt());
-        var moved0 = 0;
-        if (!pm) return;
-        if (pm.cell.d > 0) { moved0 = walkTo(me, pm.cell); if (events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] }); }
-        var r0 = cast(me.techs[p.k], p.k, pm.plan);
-        if (wantLog) log.push(entry(me, me.techs[p.k].sk, p.k, r0.rolled, r0.total, events, "prebattle", 0, moved0, r0.targets));
-      });
+      /* GameStatus.PlayStart: the AI is driven on a fixed interval (Battle.DrivePlayStartAIInterval) before Play.
+         Each tick every fighter fires its next uncast start skill (skill.TryAtStartType), in slot order, the faster
+         fighter first within a tick; the ticks repeat until nobody has a start skill left. So both sides' opening
+         buffs land before the faster tank's taunt, as seen in real fights. */
+      var queue = ents.map(function (u) { return u.techs.map(function (t, k) { return t && t.sk.startCast ? k : -1; }).filter(function (k) { return k >= 0; }); });
+      var order = ents.slice().sort(function (x, y) { return (x.t - y.t) || (x.i - y.i); });
+      for (var tick = 0; tick < 8; tick++) {
+        var any = false;
+        order.forEach(function (u) {
+          if (!queue[u.i].length) return;
+          var k = queue[u.i].shift(); any = true;
+          me = u;
+          if (!me.alive || !enemiesOf(me).length) return;
+          me.taunt = null;
+          me.st.forEach(function (x) { if (x.meta.action === "Ridicule" && ents[x.creator].alive && ents[x.creator].side !== me.side) me.taunt = ents[x.creator]; });
+          events = wantLog ? [] : null;
+          var pm = planWithMove(me, me.techs[k].sk, reachable(me, me.s.move || GRID.defaultMove), unitAt());
+          var moved0 = 0;
+          if (!pm) return;
+          if (pm.cell.d > 0) { moved0 = walkTo(me, pm.cell); if (events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] }); }
+          var r0 = cast(me.techs[k], k, pm.plan);
+          if (wantLog) log.push(entry(me, me.techs[k].sk, k, r0.rolled, r0.total, events, "prebattle", 0, moved0, r0.targets));
+        });
+        if (!any) break;
+      }
     })();
 
     var winner = -1, order = 0, rounds = 0;

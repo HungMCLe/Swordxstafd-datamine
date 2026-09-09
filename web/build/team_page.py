@@ -68,12 +68,16 @@ preceded by a fresh hop from where the fighter now stands, and a caster will ste
 for its last. A basic attack on an adjacent enemy happens when nothing is ready, and a fighter with nothing in
 reach walks toward the nearest enemy. A fallen player keeps its cell (<code>DestroyOnDie = false</code>), so
 bodies block paths.</p>
-<p><b>Before round 1, and then speed.</b> A Technique marked "Casts once before battle starts"
-(<code>skill.TryAtStartType = AutoAIAtStart</code>: Heart of Challenge, Valor Surge, Gale Dance, Void Blessing)
-fires before the first turn, fastest fighter first, from where it stands, and then sits on its cooldown. A taunt
-such as Heart of Challenge lands <i>Ridicule</i> on every enemy within three cells, and for as long as that lasts
-each of them must aim at the taunter, walking to it if needed; a fast Paladin therefore soaks the whole opening.
-Every other skill with a cooldown opens the fight on it unless it is a Zero Initial CD skill.</p>
+<p><b>Before round 1: the PlayStart phase.</b> The fight has a <code>PlayStart</code> status before
+<code>Play</code>, during which the AI is driven on a fixed interval (<code>Battle.DrivePlayStartAIInterval</code>),
+and the skill table marks what fires then (<code>skill.TryAtStartType</code>: Heart of Challenge, Valor Surge,
+Gale Dance, Void Blessing are "Casts once before battle starts"; the self-cast Charm effects such as Rapid Cast are
+<code>AutoSelfAtStart</code>). The order among fighters is server-side; what real fights show, and what this page
+does, is that every fighter fires its next start skill on each tick, the faster fighter first within the tick, so
+both sides' opening buffs land before the faster tank's taunt. A taunt such as Heart of Challenge lands
+<i>Ridicule</i> on every enemy within three cells, and for as long as that lasts each of them must aim at the
+taunter, walking to it if needed. Every other skill with a cooldown opens the fight on it unless it is a Zero
+Initial CD skill.</p>
 <p><b>Not modelled.</b> Fantomon ride along off the clock and are untargetable in the real fight; their
 triggered skills are not run here. The end-of-fight rule at the 100-round cap is server-side and unknown, so
 a capped fight is scored by remaining HP. The AI's scoring loop is server-side: the criteria and each
