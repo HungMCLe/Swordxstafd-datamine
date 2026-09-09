@@ -631,16 +631,23 @@
 
     /* "Casts once before battle starts": every AutoAIAtStart / AutoSelfAtStart Technique fires before round 1,
        fastest fighter first, and then sits on its cooldown like any other cast */
-    var pre = [];
-    sides.forEach(function (s) { s.load.forEach(function (sk, k) { if (sk && sk.startCast) pre.push({ s: s, k: k }); }); });
-    pre.sort(function (x, y) { return (x.s.t - y.s.t) || (x.s.idx - y.s.idx); });
-    pre.forEach(function (p) {
-      me = p.s; foe = sides[1 - me.idx];
-      if (me.hp <= 0 || foe.hp <= 0) return;
-      events = wantLog ? [] : null;
-      var r0 = cast(me.load[p.k], p.k);
-      if (wantLog) log.push(entry(me, me.load[p.k], p.k, r0.rolled, r0.total, events, "prebattle", 0));
-    });
+    /* GameStatus.PlayStart: driven on a fixed interval before Play; each tick both fighters fire their next
+       uncast start skill (skill.TryAtStartType), the faster one first, until none is left */
+    var queue = sides.map(function (s) { return s.load.map(function (sk, k) { return sk && sk.startCast ? k : -1; }).filter(function (k) { return k >= 0; }); });
+    var order = sides.slice().sort(function (x, y) { return (x.t - y.t) || (x.idx - y.idx); });
+    for (var tick = 0; tick < 8; tick++) {
+      var any = false;
+      order.forEach(function (s) {
+        if (!queue[s.idx].length) return;
+        var k = queue[s.idx].shift(); any = true;
+        me = s; foe = sides[1 - me.idx];
+        if (me.hp <= 0 || foe.hp <= 0) return;
+        events = wantLog ? [] : null;
+        var r0 = cast(me.load[k], k);
+        if (wantLog) log.push(entry(me, me.load[k], k, r0.rolled, r0.total, events, "prebattle", 0));
+      });
+      if (!any) break;
+    }
 
     while (sides[0].hp > 0 && sides[1].hp > 0 && turns < MAXT) {
       if (maxRounds > 0 && Math.min(sides[0].turns, sides[1].turns) >= maxRounds) { capped = true; break; }
