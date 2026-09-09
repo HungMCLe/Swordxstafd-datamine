@@ -156,52 +156,54 @@ Every fighter carries the sheet the server reports for that player and the Techn
 equipped, each at its own rank and level.</p>
 
 <div class="arena team" id="arena">
-  <div class="teamlayout">
-    <div class="boardwrap">
-      <div class="boardlabels"><span class="s1">Team 2 &mdash; top box</span></div>
-      <div class="board" id="board" aria-label="Battle grid"></div>
-      <div class="boardlabels"><span class="s0">Team 1 &mdash; bottom box</span></div>
-      <p class="hint boardhint">Drag a fighter (or tap it, then tap a cell) to any cell in its side's box.</p>
+  <section class="stage">
+    <div class="boardlabels"><span class="s1">Team 2 &mdash; top box</span><span class="hint">Y up, as the game counts; the boxes touch in the middle</span></div>
+    <div class="board big" id="board" aria-label="Battle grid"></div>
+    <div class="boardlabels"><span class="s0">Team 1 &mdash; bottom box</span><span class="hint">drag a fighter (or tap it, then a cell) inside its box</span></div>
+    <div class="timeline" id="timeline" hidden>
+      <div class="tltrack" id="tltrack" aria-hidden="true"></div>
+      <input type="range" id="tlrange" min="0" max="0" value="0" step="1" aria-label="Fight timeline">
+      <p class="tlcaption" id="tlcaption"></p>
     </div>
-    <div class="teamside">
-      <div class="teams">
-        {team(0, "Team 1")}
-        {team(1, "Team 2")}
-      </div>
-      <section class="lbwrap">
-        <div class="lbhead"><h3>Top 100 by combat rating</h3>
-          <input type="search" id="lbfind" placeholder="Find a player&hellip;" autocomplete="off">
-          <button type="button" id="fill" class="pickbtn">Fill 1&ndash;4 vs 5&ndash;8</button></div>
-        <p class="hint">Drag a row onto a team (or tap a row, then a team slot). Greyed players are on the board but
-        not captured yet.</p>
-        <div class="lb" id="lb"></div>
-      </section>
+    <div class="banner" id="banner" hidden></div>
+    <div class="playbar">
+      <button type="button" id="run" class="runbtn" disabled>Run 1,000 fights</button>
+      <button type="button" id="play" class="pickbtn" disabled>&#9654; Watch</button>
+      <button type="button" id="back" class="pickbtn" title="One action back">&#9664;</button>
+      <button type="button" id="step" class="pickbtn" disabled title="One action forward">&#9654;&#9654;</button>
+      <select id="speed" aria-label="Playback speed">
+        <option value="1000">1x &mdash; the game's own timing</option><option value="500" selected>2x</option>
+        <option value="250">4x</option><option value="0">Instant</option>
+      </select>
+      <label class="mirror">Round cap <input type="number" id="maxrounds" value="100" min="0" max="400" class="short">
+        <span class="hint">actions in total; the 4v4 stage uses 100</span></label>
+      <label class="mirror">Server age <input type="number" id="serverdays" value="150" min="0" max="400" class="short">
+        <span class="hint">days; sets the skill rank the PvP governor expects</span></label>
+      <button type="button" id="swap" class="pickbtn">Swap sides</button>
+      <button type="button" id="reset" class="pickbtn">Clear</button>
+    </div>
+    <div id="result" class="result" hidden>
+      <div class="odds"><div class="oddsbar"><span id="oddsa"></span><span id="oddsb"></span></div>
+        <p id="oddstext"></p><p id="govnote" class="hint"></p></div>
+    </div>
+  </section>
+  <div class="teamlayout2">
+    <div class="teams">
+      {team(0, "Team 1")}
+      {team(1, "Team 2")}
+    </div>
+    <div class="teamlog">
+      <h3>Combat log <span class="hint">click a line to jump there</span></h3>
+      <ol id="combatlog" class="combatlog" aria-live="polite"></ol>
     </div>
   </div>
-  <div class="banner" id="banner" hidden></div>
-  <div class="playbar">
-    <button type="button" id="run" class="runbtn" disabled>Run 1,000 fights</button>
-    <button type="button" id="play" class="pickbtn" disabled>&#9654; Watch the fight</button>
-    <button type="button" id="step" class="pickbtn" disabled>Step</button>
-    <select id="speed" aria-label="Playback speed">
-      <option value="1000">1x &mdash; the game's own timing</option><option value="500" selected>2x</option>
-      <option value="250">4x</option><option value="0">Instant</option>
-    </select>
-    <label class="mirror">Round cap <input type="number" id="maxrounds" value="100" min="0" max="400" class="short">
-      <span class="hint">actions in total; the 4v4 stage uses 100</span></label>
-    <label class="mirror">Server age <input type="number" id="serverdays" value="150" min="0" max="400" class="short">
-      <span class="hint">days; sets the skill rank the PvP governor expects</span></label>
-    <button type="button" id="swap" class="pickbtn">Swap sides</button>
-    <button type="button" id="reset" class="pickbtn">Clear</button>
-  </div>
-  <div id="result" class="result" hidden>
-    <div class="odds"><div class="oddsbar"><span id="oddsa"></span><span id="oddsb"></span></div>
-      <p id="oddstext"></p><p id="govnote" class="hint"></p></div>
-  </div>
-  <div class="teamlog">
-    <h3>Combat log</h3>
-    <ol id="combatlog" class="combatlog" aria-live="polite"></ol>
-  </div>
+  <section class="lbwrap">
+    <div class="lbhead"><h3>Top 100 by combat rating</h3>
+      <input type="search" id="lbfind" placeholder="Find a player&hellip;" autocomplete="off">
+      <button type="button" id="fill" class="pickbtn">Fill 1&ndash;4 vs 5&ndash;8</button></div>
+    <p class="hint">Drag a row onto a team (or tap a row, then a team slot).</p>
+    <div class="lb" id="lb"></div>
+  </section>
 </div>
 
 <div id="detail" hidden>
