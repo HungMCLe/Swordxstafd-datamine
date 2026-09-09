@@ -13,7 +13,7 @@
   var FIELDS = ["hp", "atk", "def", "spd", "mast", "kfm", "aff", "eres", "aegis",
                 "cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "acc", "erate", "edodge",
                 "pvpadd", "pvpres"];
-  var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "pvpadd", "pvpres"];
+  var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "pvpadd", "pvpres", "blind", "sadd", "sred", "svuln"];
   var A_COL = "#b8863b", B_COL = "#3d6ea8";
   var SIDE = ["a", "b"], WHO = ["You", "Opponent"];
 
@@ -158,6 +158,8 @@
     var eNum = 1 + aff / def.rank.BaseElementReduce + mast / foeMasterBase;
     var eDen = 1 + (elemental ? def.aegis / att.rank.BaseElementAdd : 0) + def.eres / myMasterBase;
     var pct = (1 + att.boost + (att.pvpadd || 0) + def.vuln) / Math.max(0.1, 1 + def.dmgres + (def.pvpres || 0));
+    /* Damage(): the three status-damage props are their own stage */
+    pct *= (1 + (att.sadd || 0) + (def.svuln || 0)) / Math.max(0.1, 1 + (def.sred || 0));
     var defTerm = att.atk / (att.atk + def.def);
     /* this is a player hitting a player: Damage() divides by the target's two
        per-rank PvP scalers, and the few skills with a PvpPropScale shrink too */
@@ -567,12 +569,13 @@
       var p = critChance(meE, foeE), m = critMult(meE, foeE);
       var b = blockChance(meE, foeE), bd = blockDiv(meE, foeE);
       var total = 0, fallCount = 0;
-      var blind = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
+      /* CalcDamageTypeImpl: the attacker's BlindingPercent and the target's DodgePercent, rolled per hit */
+      var blindPct = meE.blind || 0, dodgePct = foeE.dodge || 0;
       var isAttack = !pick.ec || !pick.ec.skillType || pick.ec.skillType === "Attack" || pick.id === 0;
       parts.hits.forEach(function (h) {
         if (!(h.d > 0)) { if (rolled) rolled.push({ d: 0, crit: false, block: false, absorbed: 0, blinded: false, at: h.at || 0, saved: false, skipped: true }); return; }
         var gated = h.gov === undefined ? pick.gov !== false : h.gov;         /* ScaleDamage: AffectedBySkillRank */
-        var d = h.d * (gated ? GOV : 1), crit = false, block = false, absorbed = 0, blinded = false;
+        var d = h.d * (gated ? GOV : 1), crit = false, block = false, absorbed = 0, blinded = false, dodged = false;
         var fo = null;
         h.on.forEach(function (o) { var mt = DATA.statuses[String(o.status)]; if (mt && mt.falloff) fo = mt.falloff; });
         if (fo) {
@@ -582,7 +585,8 @@
           d *= Math.pow(1 - fo.pct, steps);
           fallCount++;
         }
-        if (blind && pick.ec && pick.ec.skillType === "Attack") { d = 0; blinded = true; }
+        if (blindPct > 0 && rng() < blindPct) { d = 0; blinded = true; }
+        else if (dodgePct > 0 && rng() < dodgePct) { d = 0; dodged = true; }
         else if (rng() < b) { d /= bd; block = true; }
         else if (rng() < p) { d *= m; crit = true; }
         if (foe.shield > 0 && !h.ignoreShield && d > 0) {
@@ -592,7 +596,7 @@
         var saved = null;
         if (d > 0 && d >= foe.hp) { saved = deathSave(foe); if (saved) d = Math.max(0, foe.hp - saved.limit); }
         foe.hp -= d; total += d;
-        if (rolled) rolled.push({ d: d, crit: crit, block: block, absorbed: absorbed, blinded: blinded, at: h.at || 0, saved: !!saved });
+        if (rolled) rolled.push({ d: d, crit: crit, block: block, absorbed: absorbed, blinded: blinded, dodged: dodged, at: h.at || 0, saved: !!saved });
         if (saved) {
           if (events) events.push({ kind: "save", who: foe.idx, tag: saved.ch.name });
           if (saved.heal > 0) {
@@ -603,7 +607,7 @@
         } else if (d > 0) afterDamage(foe, me);
         if (pick.noHooks || hookDepth >= 4) return;      /* the skill's CanTriggerChild is off, or a hook chain runs too deep */
         hookDepth++;
-        var ev = { d: d, absorbed: absorbed, block: block, crit: crit, blinded: blinded, ele: pick.ele || "None", skillId: pick.id, isAttack: isAttack };
+        var ev = { d: d, absorbed: absorbed, block: block, crit: crit, blinded: blinded, dodged: dodged, ele: pick.ele || "None", skillId: pick.id, isAttack: isAttack };
         if (me.hp > 0) procs(me, "hit", foe, foe, function (pv) { return hitMatch(pv, ev, me); });
         if (foe.hp > 0) procs(foe, "damaged", me, me, function (pv) { return hitMatch(pv, ev, foe); });
         hookDepth--;
@@ -672,7 +676,7 @@
       }
       if (parts.hits.length && target === foe) total = landHits(parts, me, foe, meE, foeE, pick, rolled);
       parts.hits.forEach(function (h, hi) {
-        if (rolled[hi] && rolled[hi].blinded) return;
+        if (rolled[hi] && (rolled[hi].blinded || rolled[hi].dodged)) return;
         h.on.forEach(function (o) {
           var meta = DATA.statuses[String(o.status)];
           if (!meta || meta.falloff) return;

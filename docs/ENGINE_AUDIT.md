@@ -38,7 +38,9 @@ Status codes: **V** verified in client code or data · **O** observed in real fi
 | # | Rule | Status | Evidence |
 |---|---|---|---|
 | P1 | skills flagged `TryAtStartType` fire before round 1 | V | `GameStatus.PlayStart`, `skill.TryAtStartType` (AutoAIAtStart / AutoSelfAtStart) |
-| P2 | each tick every fighter fires its next start skill in slot order, the faster one first within the tick | O | order is server-side (`Battle.DrivePlayStartAIInterval` drives it); observed in real fights |
+| P2 | each tick every fighter fires its next start skill in slot order, the faster one first within the tick | O | observed in real fights by the user (both sides' Valor Surge before the faster tank's taunt). **Open question:** the in-game tooltip reads "they cast them from highest to lowest initial SPD ... If a character has multiple skills to cast before battle starts, Charms are cast before Techniques. Skills of the same type are cast in loadout order", which read strictly would let the fastest fighter cast all of its own start skills first. The observed interleaving is kept; the tooltip is quoted on the page |
+| P4 | order is by *initial* SPD and never re-sorted during the phase | V | the same tooltip: "SPD changes during this phase do not affect the order" |
+| P5 | Charms cast before Techniques within a fighter | M | the same tooltip. The three self-cast Charms in this data (Rapid Cast, Iron Fortress, Gale Shield) carry round-start hooks, which the engine runs on the holder's first round instead |
 | P3 | a start cast may walk first like any AI cast | A | no evidence either way |
 
 ## Movement
@@ -74,7 +76,7 @@ Status codes: **V** verified in client code or data · **O** observed in real fi
 | T11 | creature summons (Waterling Summon, Frenzy Totem, Stonechief Summon) | M | the cast is logged, no creature spawns |
 | T12 | AI chain: the skill's own list, else the chain written on the 14 skills that carry one; the last cast uses `LastAIPriorityTypes` unless `DontKeepDistance` | V/A | criteria names V; the server's default chain is unknown |
 | T13 | criterion semantics (LowerTargetHp = HP ratio, SaferPos = distance to the nearest enemy, ...) | A | names only |
-| T14 | taunt: `Ridicule` forces every plan to include the taunter, else walk to it | V/A | `SkillAiCfg.ReleaseWhileRidicule` semantics; forcing code server-side |
+| T14 | taunt, in the game's own words: "Taunted enemies target the caster only, and approach the caster when using damaging Techniques. Summoning Techniques remain available, but ally-targeting Techniques (grant buffs, healing, shields, etc.) are disabled while taunted." | V | in-game keyword tooltip. Implemented in the second pass: aim only at the taunter; ally-targeting Techniques unavailable (summoning ones stay); a damaging Technique never uses the keep-distance ordering and closes on the taunter to break ties. Where "approach" ranks among the skill's own priorities is server-side, so it sits last (A) |
 | T15 | `BattleAISetting` weights (teammate distance, bunching penalty, same-buff weights) | M | unused by the client |
 | T16 | `HitTargetActionType` | — | a no-op in the client |
 
@@ -83,7 +85,7 @@ Status codes: **V** verified in client code or data · **O** observed in real fi
 | # | Rule | Status | Evidence |
 |---|---|---|---|
 | D1 | `Damage()` pipeline: (ATK × coef / psdr + flat) × ATK/(ATK+DEF) × elemental ratio × percent block / prosdr × PvpPropScale; 90% floor on flat adds | V | `BattleFormulaHandler.Damage` |
-| D2 | block first; a blocked hit never crits | V | `CalcDamageTypeImpl` |
+| D2 | roll order per hit: the attacker's `BlindingPercent`, then the target's `DodgePercent`, then block, then crit; a blinded or dodged hit deals 0 and applies no status; a blocked hit never crits | V | `CalcDamageTypeImpl`, `Damage()` early returns (fixed in the second pass: Blind was a guaranteed miss for a whole cast, Dodge was never rolled) |
 | D3 | crit chance = 0.05 + (CritRatePercent + CritRatePercentValue/Base) − (CritAvoidPercent + CritAvoidPercentValue/Base); mult = max(1.3, 1 + CritPowerPercent − crit avoid) | V | same |
 | D4 | block chance = (BlockPercent + BlockPercentValue/Base) − (BlockAvoidPercent + BlockAvoidPercentValue/Base); divisor = max(1.5, 1 + BlockValuePercent − attacker's block avoid) | V | same |
 | D5 | `HitDamageType.None` hits deal nothing (statuses, moves and child skills still apply) | V | `CalcDamageType` computes only Prop/CustomDamage/SkillCost; `GameRoundUI` (fixed in this audit) |
@@ -96,7 +98,13 @@ Status codes: **V** verified in client code or data · **O** observed in real fi
 | D12 | `PvpPropScale` on skill props except CD | V | `ScaleSrcPropsByPvp` |
 | D13 | `Cure()`: (MaxHp × SkillCureByHp \| Attack × SkillCureByAttack \| target MaxHp × SkillCureByTargetHp) + SkillFixedCure, × (1 + CureAddPercent + BeCureAddPercent + CureAdd/Base + BeCureAdd/Base) × (1 + FinalCureScale) | V | `BattleFormulaHandler.Cure`, `CalcCureAdd` |
 | D14 | landing rolls: `EffectRate()` with the cubed-ratio penalty for AbnormalDebuff | V | client |
-| D15 | Blind: the first Attack skill deals 0, then clears | V | |
+| D15 | Blind is a *chance*: the status grants its holder `BlindingPercent` 50% for one Technique (`DurationSkillCount` 1), rolled per hit | V | status 24234 props; `CalcDamageTypeImpl` |
+| D16 | Dodge: the target's `DodgePercent`, rolled per hit. Only status 24209 (Void Bubble) grants it in this data, and it did nothing before the second pass | V | status 24209 props |
+| D17 | `StatusDmgAddPer` (src) and `StatusDmgVulnerablePer` (tgt) multiply, `StatusDmgReducePer` (tgt) divides, as their own stage after the percent block — not folded into DmgAddPercent/DmgReducePercent | V | `Damage()`; 17/5/10 statuses carry them |
+| D18 | flat `CritPower` added and flat `BlockValue` subtracted inside the additive term when the hit crits or is blocked | M | `Damage()` num3; no fighter sheet and no status in this data carries either, so the term is always zero |
+| D19 | profession damage scales (`ZhanshiDmgAddScale` and kin), `FinalDamageScale`, `FinalCharacterDamageScale`, `SkillDmgAddPerByTargetHp`, distance bonuses, cooking finals | M | `Damage()`; every one is zero or absent across all 98 captured sheets |
+| D20 | level offset and rank offset damage | — | `Damage()` applies both only when `!IsPvp`; this is PvP |
+| D21 | combat-rating suppression | M | `IsCombatRatingSuppressionEfective` returns true in PvP, but the value comes from the battle setup and the config table (`fight_combat_rating_suppression`) is keyed by target level against a recommended power, i.e. the PvE band mechanic; the PvP balancer we do model is the governor |
 
 ## Statuses and Charms
 
@@ -114,7 +122,28 @@ Status codes: **V** verified in client code or data · **O** observed in real fi
 | S10 | grid-item statuses count on the creator's rounds and vanish with the creator | V | `RoundTarget Creator`, `StatusAutoRemove.RemoveAtRoundTargetDie` |
 | S11 | Fantomon (pets) | M | off the clock (`FollowMaster`), untargetable; not run |
 
-## Fixes made in the 2026-09-09 audit
+## Second pass, 2026-09-09 (user-reported)
+
+Prompted by three questions: a taunted fighter walking away from its taunter, a single Meteoric Flames doing far
+more damage than expected, and whether the damage pipeline is really the client's.
+
+- **Taunt was half-implemented.** Aiming was forced at the taunter, but the fighter still used the keep-distance
+  ordering on its last cast of the turn and so retreated (Purr, taunted by Wei, walked from 2 cells away to 6),
+  and it could still cast buffs, heals and shields on itself and allies. Both now follow the in-game taunt text.
+  Over 300 logged fights no taunted fighter now ends a move more than one cell farther from its taunter, and the
+  only ally-targeting casts under a listed Ridicule happen after the taunter has fallen.
+- **Dodge was never rolled** and **Blind was a guaranteed miss** for a whole cast. Both are per-hit rolls in
+  `CalcDamageTypeImpl`, on the target's `DodgePercent` and the attacker's `BlindingPercent` respectively.
+- **The three status-damage props** now form their own multiplicative stage instead of being folded into the
+  DmgAddPercent / DmgReducePercent block.
+- **The damage pipeline was re-derived term by term against `Damage()`** and matches, including the elemental
+  divisor split, the two per-rank PvP scalers and where each sits, the additive term's 90% floor, and the crit and
+  block multipliers with their avoid terms. The large hits are real: at Champion I a Meteoric Flames from an
+  Archmage onto a low-DEF Arcanist computes to about 250K from the coefficient plus about 148K from the skill's
+  flat term, so roughly 398K, and a crit at 1.57x makes about 625K before the PvP governor. What the client would
+  add beyond this is listed as D18&ndash;D21, and every one of those props is zero in the captured data.
+
+## Fixes made in the first 2026-09-09 pass
 
 - Removed inventions: the basic attack, the redundant-buff skip, one walk per turn, the "keep distance" chain, self-centred aims facing the nearest enemy, a speed-sorted pre-battle list.
 - Added client rules that were missing: crit/block value terms and the attacker's block avoid in the divisor; the full `Cure()`; the governor gate per prop group (heals and shields never scaled); `HitTargetType` None/All; `SkillTargetType` checks; facing and flip rules; `SourceMoveList` leaps and damage `MoveCfg` pulls; random-target picks grouped per HitCfg; child skills on every covered unit; fourteen Charm component types.
