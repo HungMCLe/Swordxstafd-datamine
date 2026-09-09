@@ -3,6 +3,7 @@
   python tools/liveproto/roster.py ingest out/liveproto/cap3/decoded.json [more decoded.json ...]
   python tools/liveproto/roster.py show [name or id ...]
   python tools/liveproto/roster.py fighters Wei Nilee ... -o out/liveproto/fighters.json
+  python tools/liveproto/roster.py fighters --top -o out/liveproto/fighters.json   (captured players of the latest top-100, in rank order)
 
 The roster lives in out/liveproto/roster.json (gitignored: it holds other players' data). Newer data
 replaces older per player; a short history of combat rating and the four main stats is kept.
@@ -121,23 +122,43 @@ def skills_of(snap):
             out.append(dict(group=int(group), slot=int(slot), id=raw.get('Id'), rank=ps.get('Rank'), level=ps.get('Level')))
     return sorted(out, key=lambda s: (s['group'], s['slot']))
 
-def fighters(keys, outp):
+def fighter_record(p):
+    snap = p.get('snapshot') or {}
+    return dict(id=p['id'], name=p.get('name'), profession=p.get('profession'), level=p.get('level'), subRank=p.get('subRank'),
+                combatRating=p.get('combatRating'), battleProps=p.get('battleProps'), battlePropsTime=p.get('battlePropsTime'),
+                skills=skills_of(snap) if snap else None,
+                passives=[dict(id=w['RawData']['Id'], **(w['RawData'].get('ParamDict', {}).get('ItemParamSkill') or {})) for w in (snap.get('PassiveSkills') or [])] if snap else None,
+                engagePet=p.get('engagePetClassId'))
+
+def fighters(keys, outp, top=False):
+    """Export fighters by name/id, or (top=True) every captured player of the latest top-100, in rank order."""
     r = load()
     res, missing = [], []
-    for k in keys:
-        p = find(r, k)
-        if not p:
-            missing.append(k); continue
-        snap = p.get('snapshot') or {}
-        res.append(dict(id=p['id'], name=p.get('name'), profession=p.get('profession'), level=p.get('level'), subRank=p.get('subRank'),
-                        combatRating=p.get('combatRating'), battleProps=p.get('battleProps'), battlePropsTime=p.get('battlePropsTime'),
-                        skills=skills_of(snap) if snap else None,
-                        passives=[dict(id=w['RawData']['Id'], **(w['RawData'].get('ParamDict', {}).get('ItemParamSkill') or {})) for w in (snap.get('PassiveSkills') or [])] if snap else None,
-                        engagePet=p.get('engagePetClassId')))
+    if top:
+        ranks = sorted(r['rankings'].values(), key=lambda x: x['time'])
+        latest = ranks[-1] if ranks else None
+        if not latest:
+            print('no ranking captured yet'); return
+        for pos, (pid, score) in enumerate(zip(latest['ids'], latest['scores']), 1):
+            p = r['players'].get(str(pid)) or dict(id=pid)
+            if not (p.get('battleProps') and p.get('snapshot')):
+                missing.append(p.get('name') or pid); continue
+            rec = fighter_record(p)
+            rec['rankPos'] = pos
+            rec['rankScore'] = score
+            res.append(rec)
+    else:
+        for k in keys:
+            p = find(r, k)
+            if not p:
+                missing.append(k); continue
+            res.append(fighter_record(p))
     json.dump(res, open(outp, 'w', encoding='utf-8'), indent=1, ensure_ascii=False)
-    print(f'wrote {len(res)} fighters -> {outp}; missing: {missing or "none"}')
+    full = sum(1 for f in res if not f.get('incomplete'))
+    print(f'wrote {len(res)} fighters ({full} with stats) -> {outp}; without stats: {len(missing)}')
     for f in res:
-        print(f'  {f["name"]:16s} props={"yes" if f["battleProps"] else "NO"} skills={len(f["skills"]) if f["skills"] else "NO"}')
+        if not f.get('incomplete'):
+            print(f'  {str(f["name"]):16s} props=yes skills={len(f["skills"]) if f["skills"] else "NO"}')
 
 if __name__ == '__main__':
     a = sys.argv[1:]
@@ -149,5 +170,5 @@ if __name__ == '__main__':
         show(a[1:])
     elif a[0] == 'fighters':
         o = a[a.index('-o') + 1] if '-o' in a else os.path.join(ROOT, 'out', 'liveproto', 'fighters.json')
-        names = [x for x in a[1:] if x != '-o' and x != o]
-        fighters(names, o)
+        names = [x for x in a[1:] if x not in ('-o', '--top') and x != o]
+        fighters(names, o, top='--top' in a)

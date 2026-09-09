@@ -95,7 +95,11 @@ def walk_hits(hitlist, out, depth=0, t0=0.0):
         out.append({"prop": info.get("DamageProp"), "fixed": info.get("FixedDamageProp"),
                     "type": info.get("DamageType"), "kind": name.replace("Fight", "").replace("Component", ""),
                     "scope": len(info.get("Scope") or []), "on": on, "at": at,
-                    "true": bool(info.get("IsTrueDamage")), "ignoreShield": bool(info.get("DamageIgnoreShield"))})
+                    "true": bool(info.get("IsTrueDamage")), "ignoreShield": bool(info.get("DamageIgnoreShield")),
+                    # the area: cell offsets from the hit centre (HitScopCfg.Pos), and whether that centre is
+                    # the caster's own cell (HitCfg.ActOnSouce) rather than the skill's aim point
+                    "cells": [list(c.get("Pos") or [0, 0]) for c in (info.get("Scope") or [])],
+                    "onSource": bool(h.get("ActOnSouce"))})
 
 
 def skill_ec(ec_entity_id):
@@ -110,6 +114,9 @@ def skill_ec(ec_entity_id):
               (max([h["at"] for h in hits]) + 0.4) if hits else 0.8)
     return {"ele": fsc.get("ElementType") or "None", "skillType": fsc.get("SkillType"),
             "target": fsc.get("TargetType"), "hits": hits, "dur": round(dur, 2),
+            # where the aim point may be placed: offsets from the caster, near to far (FightSkillComponentInfo.Range)
+            "range": [list(r) for r in (fsc.get("Range") or [])], "rangeType": fsc.get("RangeType"),
+            "targetKind": fsc.get("SkillTargetType"),
             "resetCdAtStart": bool(fsc.get("ResetCDAtStart")),
             "limitedTimes": fsc.get("LimitedTimes", -1), "aiPriority": ai,
             "needCondition": bool(fsc.get("NeedConditionStatusMeetToRelease"))}

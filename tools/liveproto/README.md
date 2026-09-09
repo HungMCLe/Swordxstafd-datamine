@@ -37,17 +37,19 @@ python tools\liveproto\gproto.py decode out\liveproto\streams.json out\liveproto
 
 Keep what you decode with `roster.py`: it merges every capture into `out/liveproto/roster.json` (one entry
 per player: name, class, level, rank, combat rating, the live `BattleProps`, the full sheet, and a short
-history), prints a table, and exports fighters for the simulators.
+history), prints a table, and exports fighters for the simulators. The site build turns that export into
+`web/dist/assets/fighters.json` (gitignored) for the team battle page, so `combat/team.html` lists every
+captured top-100 player; a long capture while clicking through the whole list fills it (98 of 100 in one pass).
 
 ```
 python tools\liveproto\roster.py ingest out\liveproto\cap3\decoded.json
 python tools\liveproto\roster.py show Wei Elexarie
-python tools\liveproto\roster.py fighters Wei Nlilee Shortbuslife Awry -o out\liveproto\fighters.json
+python tools\liveproto\roster.py fighters --top -o out\liveproto\fighters.json     # captured players of the latest top-100, in rank order
 ```
 
 A live `BattleProps` block was checked against the in-game Character Stats screen of the same player:
 all 33 stats shown there (ATK, DEF, HP, SPD, crit, block, boosts, masteries, affinities, aegis) matched
-to the digit. "Accuracy" on that screen has no prop of its own in the block.
+to the digit. "Accuracy" on that screen is `BlockAvoidPercent` (26.6% shown, 2660 in the block).
 
 ## What the messages carry
 

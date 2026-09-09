@@ -772,3 +772,95 @@ svg.abtree circle.nd{fill:var(--faint)} svg.abtree text{font:700 11px var(--body
 .costs .c-base,.costs .c-top{display:none}
 [data-costs="base"] .costs .c-as,[data-costs="base"] .costs .c-top{display:none} [data-costs="base"] .costs .c-base{display:inline}
 [data-costs="top"] .costs .c-as,[data-costs="top"] .costs .c-base{display:none} [data-costs="top"] .costs .c-top{display:inline}
+
+/* ---- team battle (4v4) ---- */
+.arena.team{padding-bottom:18px}
+.boardwrap{margin:0 0 14px}
+.boardlabels{display:flex;justify-content:space-between;font:600 11.5px var(--body);letter-spacing:.12em;text-transform:uppercase;margin:0 2px 6px}
+.boardlabels .s0,.teamname.s0,.combatlog li.s0 b,.dot.s0{color:var(--gold-rail)}
+.boardlabels .s1,.teamname.s1,.combatlog li.s1 b,.dot.s1{color:var(--blue-rail)}
+.board{display:grid;gap:4px;padding:6px;border-radius:12px;background:var(--raised);border:1px solid var(--line)}
+.board .cell{position:relative;aspect-ratio:1;min-height:56px;border-radius:8px;background:var(--surface);border:1px dashed var(--line)}
+.board .cell.z0{background:color-mix(in srgb,var(--gold-rail) 9%,var(--surface))}
+.board .cell.z1{background:color-mix(in srgb,var(--blue-rail) 10%,var(--surface))}
+.board .cell.over{outline:2px solid var(--gold-rail)}
+.token{position:absolute;inset:3px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;border-radius:7px;
+  background:var(--surface);border:2px solid var(--gold-rail);cursor:grab;user-select:none;box-shadow:0 1px 3px rgba(0,0,0,.12);transition:transform .25s}
+.token.s1{border-color:var(--blue-rail)}
+.token.acting{transform:scale(1.06);box-shadow:0 0 0 3px color-mix(in srgb,var(--gold-rail) 45%,transparent)}
+.token.hit{animation:tokhit .45s}
+.token.down{opacity:.35;filter:grayscale(1)}
+.token.picked{outline:3px solid var(--gold-rail)}
+.token .tname{font:700 11px var(--body);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 3px}
+.token .tcls{font:500 9.5px var(--body);color:var(--faint)}
+.token .thp{width:80%;height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+.token .thp i{display:block;height:100%;background:#6db27d}
+@keyframes tokhit{0%{transform:translateX(0)}30%{transform:translateX(-3px)}60%{transform:translateX(3px)}100%{transform:translateX(0)}}
+.teams{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:0 0 12px}
+.teamname{margin:0 0 8px;font:600 11.5px var(--body);letter-spacing:.12em;text-transform:uppercase}
+.tcards{display:grid;gap:8px}
+.tcard{padding:9px 10px;border-radius:10px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--gold-rail)}
+.tcard.s1{border-left-color:var(--blue-rail)}
+.tcard.empty{border-style:dashed}
+.tcard .thead{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;margin-bottom:6px}
+.tcard .pickf{font:600 13px var(--body);padding:4px 6px;border-radius:6px;max-width:100%}
+.tcard .tmeta{font:500 11.5px var(--body);color:var(--muted)}
+.hpbar.small{height:14px;margin:0 0 6px}
+.hpbar.small .hptext{font-size:10.5px}
+.tstats{display:flex;flex-wrap:wrap;gap:3px 10px;font:500 11.5px var(--mono);color:var(--muted);margin:4px 0}
+.tskills{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:4px}
+.tskills .lab{font:600 10px var(--body);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-right:3px;min-width:68px}
+.tskills .sk{position:relative;width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:var(--raised);display:inline-flex;align-items:center;justify-content:center;font:700 10px var(--body);overflow:visible}
+.tskills .sk img{width:100%;height:100%;border-radius:50%;object-fit:cover}
+.tskills .sk b{position:absolute;right:-4px;bottom:-4px;font:700 9px var(--mono);background:var(--ink);color:var(--surface);border-radius:8px;padding:1px 4px}
+.teamlog{margin-top:12px}
+.teamlog h3{margin:0 0 6px;font:600 11.5px var(--body);letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.teamlog .combatlog{max-height:340px;overflow:auto;margin:0;padding:8px 10px 8px 26px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.combatlog .hits{font:500 11.5px var(--mono);color:var(--muted)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:currentColor;margin-right:6px}
+.importbox{width:100%;box-sizing:border-box;font:12px var(--mono);padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+@media (max-width:760px){
+  .teams{grid-template-columns:1fr}
+  .board .cell{min-height:44px}
+  .token .tcls{display:none}
+  .token .tname{font-size:10px}
+}
+/* ---- team battle: layout with the leaderboard ---- */
+.teamlayout{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:18px;align-items:start}
+.teamside{min-width:0}
+.teams{grid-template-columns:1fr 1fr}
+.tcards{min-height:60px}
+.tslot{min-height:44px;border:1px dashed var(--line);border-radius:10px;padding:8px 10px;color:var(--faint);font:500 12px var(--body);display:flex;align-items:center;justify-content:center}
+.tslot.over,.tcard.over{outline:2px solid var(--gold-rail)}
+.tcard .tremove{margin-left:auto;font:700 12px var(--body);border:0;background:transparent;color:var(--faint);cursor:pointer}
+.tcard .tremove:hover{color:var(--ink)}
+.tcard .tname{font:700 14px var(--body);color:var(--ink)}
+.lbwrap{margin-top:14px}
+.lbhead{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.lbhead h3{margin:0;font:600 11.5px var(--body);letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.lbhead input{font:500 13px var(--body);padding:6px 8px;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink);min-width:140px}
+.lb{max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface);margin-top:6px}
+.lb .row{display:grid;grid-template-columns:34px 1fr auto;gap:2px 10px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--line);cursor:grab;font:500 12.5px var(--body)}
+.lb .row:last-child{border-bottom:0}
+.lb .row:hover{background:var(--raised)}
+.lb .row.picked{outline:2px solid var(--gold-rail);outline-offset:-2px}
+.lb .row.inteam{opacity:.5}
+.lb .row .pos{font:700 12px var(--mono);color:var(--faint)}
+.lb .row .who b{font-weight:700}
+.lb .row .who span{color:var(--muted);font-size:11.5px;margin-left:6px}
+.lb .row .cr{font:600 12px var(--mono);color:var(--muted)}
+.board{max-width:320px}
+@media (max-width:760px){
+  .teamlayout{grid-template-columns:1fr}
+  .board{max-width:none}
+  .teams{grid-template-columns:1fr 1fr}
+}
+.board .cell.out{background:var(--raised);border-style:solid;opacity:.75}
+.board .cell.blk{background:repeating-linear-gradient(45deg,var(--line) 0 4px,var(--raised) 4px 8px);border-style:solid}
+.arena.team .board{max-width:380px;gap:3px;padding:5px}
+.arena.team .board .cell{min-height:0;border-radius:6px}
+.arena.team .token{inset:2px;border-width:1.5px;border-radius:5px;gap:1px}
+.arena.team .token .tname{font-size:9.5px}
+.arena.team .token .tcls{display:none}
+.arena.team .token .thp{height:3px}
+@media (max-width:760px){ .arena.team .board{max-width:none} .arena.team .token .tname{font-size:9px} }
