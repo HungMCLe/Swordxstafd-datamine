@@ -282,7 +282,10 @@
                   AttackScale: "ATK", DefenceScale: "DEF", SpeedScale: "SPD", MaxHpScale: "HP",
                   DmgAddPercent: "DMG Boost", DmgReducePercent: "DMG RES", CritRatePercent: "Crit Rate",
                   CritPowerPercent: "Crit DMG", BlockPercent: "Block Rate", StatusDmgVulnerablePer: "Vulnerable",
-                  DmgVulnerable: "Vulnerable", CritAvoidPercent: "Crit RES", ElementMaster: "Mastery" };
+                  DmgVulnerable: "Vulnerable", CritAvoidPercent: "Crit RES", ElementMaster: "Mastery",
+                  BlockAvoidPercent: "Accuracy", EffectRate: "Effect Hit", EffectDodge: "Effect RES", KongFuMaster: "Phys Mastery",
+                  ElementResistance: "Elem RES", KongFuResistance: "Phys RES", CureAddPercent: "Healing", StatusAdd1: "Effect",
+                  StatusAdd2: "Effect", CritRatePercentValue: "Crit Rate", BlockPercentValue: "Block Rate", CritAvoidPercentValue: "Crit RES" };
       return (meta.type === "Debuff" || meta.type === "AbnormalDebuff" ? "−" : "+") + (LAB[k] || k);
     }
     if (meta.stack) return meta.type === "Debuff" ? "Mark" : "Stack";
@@ -903,7 +906,8 @@
   var TEAM = [[null, null, null, null], [null, null, null, null]];
   var POS = [];                    /* positions by team slot index 0..7 */
   var RESULT = null, PLAY = null, TIMERS = [];
-  var PICK = null;                 /* tapped leaderboard row (fighter id) awaiting a slot */
+  var PICK = null;                 /* tapped leaderboard row (fighter id) or token awaiting a cell */
+  var VIEW = null;                 /* the window of the map the board shows */
 
   function byId(id) { return ROSTER.filter(function (f) { return f.id === id; })[0] || null; }
   function defaultPositions() {
@@ -934,14 +938,13 @@
     for (var y = z.y0; y <= z.y1; y++) for (var x = z.x0; x <= z.x1; x++) if (!taken[x + "," + y]) return { x: x, y: y };
     return { x: starts[0][0], y: starts[0][1] };
   }
-  /* put fighter id into team slot i (0..7); the fighter leaves any slot it held */
   function assign(i, id) {
     var f = byId(id);
     if (!f) return;
     var was = slotOf(id);
     var side = i < 4 ? 0 : 1, prev = fightersFlat()[i];
     if (was >= 0 && was !== i) {
-      TEAM[was < 4 ? 0 : 1][was % 4] = prev || null;             /* swap with whatever sat in the target slot */
+      TEAM[was < 4 ? 0 : 1][was % 4] = prev || null;
       if (prev) POS[was] = inZone(was < 4 ? 0 : 1, POS[was].x, POS[was].y) ? POS[was] : freeCell(was < 4 ? 0 : 1, was);
     }
     TEAM[side][i % 4] = f;
@@ -950,35 +953,60 @@
   }
   function unassign(i) { TEAM[i < 4 ? 0 : 1][i % 4] = null; saveState(); invalidate(); }
 
-  /* ---------- board ---------- */
-  var DRAG = null;   /* {kind:"token", i} or {kind:"lb", id} */
-  function playing() { return !!(PLAY && PLAY.playing); }   /* edits are blocked only while a fight is being played back */
-  function drawBoard() {
-    var b = $("board"), v = GRID.view;
-    b.style.gridTemplateColumns = "repeat(" + (v.x1 - v.x0 + 1) + ", 1fr)";
+  /* ---------- the board ---------- */
+  var DRAG = null;
+  function playing() { return !!(PLAY && PLAY.playing); }
+  function baseView() { return { x0: GRID.view.x0, x1: GRID.view.x1, y0: GRID.view.y0, y1: GRID.view.y1 }; }
+  function viewFor(positions) {
+    var v = baseView();
+    (positions || []).forEach(function (p) { v.x0 = Math.min(v.x0, p[0]); v.x1 = Math.max(v.x1, p[0]); v.y0 = Math.min(v.y0, p[1]); v.y1 = Math.max(v.y1, p[1]); });
+    return v;
+  }
+  function drawBoard(view) {
+    view = view || baseView();
+    if (VIEW && VIEW.x0 === view.x0 && VIEW.x1 === view.x1 && VIEW.y0 === view.y0 && VIEW.y1 === view.y1) return;
+    VIEW = view;
+    var b = $("board");
+    b.style.gridTemplateColumns = "repeat(" + (view.x1 - view.x0 + 1) + ", 1fr)";
     var h = "";
-    for (var y = v.y1; y >= v.y0; y--) for (var x = v.x0; x <= v.x1; x++) {
+    for (var y = view.y1; y >= view.y0; y--) for (var x = view.x0; x <= view.x1; x++) {
       var cls = inZone(0, x, y) ? " z0" : inZone(1, x, y) ? " z1" : " out";
       if (BLOCKED[x + "," + y]) cls += " blk";
       h += '<div class="cell' + cls + '" data-x="' + x + '" data-y="' + y + '" title="column ' + (x + 1) + ", row " + (y + 1) + '"></div>';
     }
     b.innerHTML = h;
-    placeTokens(null);
+  }
+  function cellAt(x, y) { return document.querySelector('#board .cell[data-x="' + x + '"][data-y="' + y + '"]'); }
+  /* a status as a badge above the head: what the game marks with an icon over the unit */
+  var BADGE = { Ridicule: ["TAUNT", "ctl"], Stun: ["STUN", "ctl"], Frozen: ["FROZEN", "ctl"], Blind: ["BLIND", "ctl"], Fear: ["FEAR", "ctl"],
+                Confusion: ["CONFUSED", "ctl"], Restrict: ["ROOTED", "ctl"], Immobilize: ["ROOTED", "ctl"], SlowAction: ["SLOW", "bad"],
+                Poisoned: ["POISON", "bad"], Burn: ["BURN", "bad"], Chill: ["CHILL", "bad"], Damp: ["DAMP", "bad"], Shield: ["SHIELD", "good"],
+                Mark: ["MARK", "bad"], Stack: ["STACK", "good"], Buff: ["BUFF", "good"], Debuff: ["DEBUFF", "bad"], Effect: ["EFFECT", "good"] };
+  function badgeOf(st) {
+    var b = BADGE[st.n];
+    if (!b) b = [st.n, (st.t === "Debuff" || st.t === "AbnormalDebuff") ? "bad" : "good"];
+    return '<span class="badge ' + b[1] + '" title="' + esc(st.n) + (st.d > 0 ? " · " + st.d + " turn" + (st.d > 1 ? "s" : "") + " left" : "") + '">' + esc(b[0]) + (st.s > 1 ? "×" + st.s : "") + (st.d > 0 ? '<i>' + st.d + '</i>' : "") + '</span>';
   }
   function tokenHtml(f, i, cur) {
     var side = i < 4 ? 0 : 1;
     var hp = cur ? cur.hp[i] : f.sheet.hp, pct = Math.max(0, Math.min(1, hp / f.sheet.hp));
     var dead = cur && !cur.alive[i];
-    return '<div class="token s' + side + (dead ? " down" : "") + '" draggable="' + (cur ? "false" : "true") + '" data-i="' + i + '" title="' + esc(f.name) + '">' +
+    var sh = cur ? cur.sh[i] : 0;
+    var badges = (cur && cur.st[i] && !dead) ? cur.st[i].slice(0, 3).map(badgeOf).join("") : "";
+    var taunted = cur && cur.st[i] && cur.st[i].some(function (s) { return s.n === "Ridicule"; });
+    return '<div class="token s' + side + (dead ? " down" : "") + (taunted ? " taunted" : "") + '" draggable="' + (cur ? "false" : "true") + '" data-i="' + i + '" title="' + esc(f.name) + '">' +
+      '<div class="tstat">' + badges + '</div>' +
       '<span class="tname">' + esc(f.name) + '</span><span class="tcls">' + esc(f.cls) + '</span>' +
-      '<span class="thp"><i style="width:' + (pct * 100).toFixed(1) + '%"></i></span></div>';
+      '<span class="thp"><i style="width:' + (pct * 100).toFixed(1) + '%"></i>' + (sh > 0 ? '<b style="width:' + Math.min(100, sh / f.sheet.hp * 100).toFixed(1) + '%"></b>' : "") + '</span>' +
+      '<span class="thpn">' + (dead ? "down" : short(hp)) + '</span></div>';
   }
   function placeTokens(cur) {
-    document.querySelectorAll("#board .cell").forEach(function (c) { c.innerHTML = ""; });
+    drawBoard(cur ? viewFor(cur.pos) : baseView());
+    document.querySelectorAll("#board .cell").forEach(function (c) { c.innerHTML = ""; c.classList.remove("from", "aim"); });
     fightersFlat().forEach(function (f, i) {
       if (!f) return;
       var p = cur ? { x: cur.pos[i][0], y: cur.pos[i][1] } : POS[i];
-      var cell = document.querySelector('#board .cell[data-x="' + p.x + '"][data-y="' + p.y + '"]');
+      var cell = cellAt(p.x, p.y);
       if (cell) cell.innerHTML = tokenHtml(f, i, cur);
     });
   }
@@ -989,14 +1017,14 @@
     POS.forEach(function (p, k) { if (k !== i && p.x === x && p.y === y && fightersFlat()[k]) occ = k; });
     if (occ >= 0) { if ((occ < 4) !== (i < 4)) return false; POS[occ] = { x: POS[i].x, y: POS[i].y }; }
     POS[i] = { x: x, y: y };
-    saveState(); placeTokens(null); invalidate();
+    saveState(); invalidate();
     return true;
   }
   function boardEvents() {
     var b = $("board");
     b.addEventListener("dragstart", function (ev) {
       var t = ev.target.closest ? ev.target.closest(".token") : null;
-      if (!t || playing()) { ev.preventDefault(); return; }
+      if (!t || playing() || RESULT) { ev.preventDefault(); return; }
       DRAG = { kind: "token", i: parseInt(t.getAttribute("data-i"), 10) };
       ev.dataTransfer.setData("text/plain", "token:" + DRAG.i);
       ev.dataTransfer.effectAllowed = "move";
@@ -1022,7 +1050,7 @@
       if (playing()) return;
       var t = ev.target.closest ? ev.target.closest(".token") : null;
       var c = ev.target.closest ? ev.target.closest(".cell") : null;
-      if (t) { PICK = { token: parseInt(t.getAttribute("data-i"), 10) }; paintPick(); return; }
+      if (t) { if (RESULT) return; PICK = { token: parseInt(t.getAttribute("data-i"), 10) }; paintPick(); return; }
       if (c && PICK) {
         var x = +c.getAttribute("data-x"), y = +c.getAttribute("data-y");
         if (PICK.token !== undefined) { moveToken(PICK.token, x, y); PICK = null; paintPick(); }
@@ -1030,7 +1058,6 @@
       }
     });
   }
-  /* a leaderboard fighter dropped on a cell: join that side (first free slot) and stand there */
   function dropFromBoard(id, x, y) {
     if (!inZone(0, x, y) && !inZone(1, x, y)) return;
     var side = inZone(0, x, y) ? 0 : 1;
@@ -1114,7 +1141,7 @@
       if (!s || !DRAG || DRAG.kind !== "lb") return;
       ev.preventDefault(); s.classList.remove("over");
       var i = s.hasAttribute("data-i") ? +s.getAttribute("data-i") : -1;
-      if (i < 0) {                       /* dropped on the column: first free slot of that team */
+      if (i < 0) {
         var sd = +s.getAttribute("data-side");
         TEAM[sd].forEach(function (f, k) { if (!f && i < 0) i = sd * 4 + k; });
         if (i < 0) i = sd * 4 + 3;
@@ -1155,13 +1182,13 @@
 
   /* ---------- running ---------- */
   function invalidate() {
-    RESULT = null; stopPlayback();
-    $("result").hidden = true; $("detail").hidden = true;
+    RESULT = null; stopPlayback(); PLAY = null;
+    $("result").hidden = true; $("detail").hidden = true; $("timeline").hidden = true;
     $("play").disabled = true; $("step").disabled = true;
     $("run").disabled = !ready() || !DATA;
-    $("combatlog").innerHTML = '<li class="empty">' + (ready() ? "Run the fight, then watch or step through it." : "Fill both teams to run a fight.") + '</li>';
+    $("combatlog").innerHTML = '<li class="empty">' + (ready() ? "Run the fight, then watch it, step through it, or drag the timeline." : "Fill both teams to run a fight.") + '</li>';
     $("banner").hidden = true;
-    placeTokens(null); drawCards();
+    VIEW = null; placeTokens(null); drawCards();
   }
   function run() {
     if (!ready() || !DATA) return;
@@ -1191,11 +1218,13 @@
       "Survival: " + F.map(function (f, i) { return esc(f.name) + " " + (R.survive[i] / R.N * 100).toFixed(0) + "%"; }).join(", ") + ".";
     var g = R.gov.parts;
     $("govnote").innerHTML = "PvP governor ×" + R.gov.scale.toFixed(3) + " (survival floor ×" + g.survival.toFixed(3) + ", skill-rank ×" + g.rankScale.toFixed(3) + " at fight rank " + g.fightRank + " vs server " + g.serverRank + ", balance ×" + g.balance.toFixed(3) + ").";
-    $("result").hidden = false; $("detail").hidden = false;
+    $("result").hidden = false; $("detail").hidden = false; $("timeline").hidden = false;
     $("play").disabled = false; $("step").disabled = false;
-    PLAY = { sample: R.sample, i: 0, playing: false, busy: false };
-    sceneReset();
+    PLAY = { sample: R.sample, i: 0, playing: false };
+    buildTimeline(R.sample);
+    renderLog(R.sample);
     fillTable(R.sample);
+    seekTo(0);
   }
   function hitText(h) { return (h.blinded ? "blind" : short(h.d)) + (h.crit ? " crit" : "") + (h.block ? " blocked" : "") + (h.absorbed ? " (−" + short(h.absorbed) + " shield)" : ""); }
   function fillTable(sample) {
@@ -1206,67 +1235,102 @@
     }).join("");
   }
 
-  /* ---------- playback ---------- */
+  /* ---------- the timeline and the scene ---------- */
+  function eventText(F, e) {
+    if (e.kind === "dmg") return esc(F[e.who].name) + " takes " + short(e.amount) + " from " + esc(e.tag);
+    if (e.kind === "heal") return esc(F[e.who].name) + " heals " + short(e.amount) + (e.tag ? " (" + esc(e.tag) + ")" : "");
+    if (e.kind === "status") return esc(F[e.who].name) + ": " + esc(e.name) + (e.tag ? " (" + esc(e.tag) + ")" : "");
+    if (e.kind === "save") return esc(F[e.who].name) + " survives at 1 HP (" + esc(e.tag) + ")";
+    if (e.kind === "down") return esc(F[e.who].name) + " is down";
+    if (e.kind === "move") return esc(F[e.who].name) + " moves to column " + (e.to[0] + 1) + ", row " + (e.to[1] + 1);
+    return "";
+  }
+  function buildTimeline(sample) {
+    var F = fightersFlat(), n = sample.log.length;
+    var tr = $("tltrack"), h = "";
+    var lastTurn = -1;
+    sample.log.forEach(function (l, k) {
+      var cls = "seg s" + l.side + (l.turn === 0 ? " pre" : "") + (l.dmg ? " dmg" : "") + (l.turn !== lastTurn && l.sub === 0 ? " newturn" : "");
+      lastTurn = l.turn;
+      h += '<span class="' + cls + '" data-k="' + (k + 1) + '" title="' + esc(F[l.who].name + ": " + l.skill) + '"></span>';
+    });
+    tr.innerHTML = h;
+    var r = $("tlrange"); r.max = n; r.value = 0;
+  }
+  function renderLog(sample) {
+    var F = fightersFlat();
+    $("combatlog").innerHTML = sample.log.map(function (l, k) {
+      var tg = (l.targets || []).map(function (i) { return esc(F[i].name); }).join(", ");
+      var hits = l.hits.map(function (h) { return (h.blinded ? "blind" : short(h.d)) + (h.crit ? "!" : "") + (h.block ? " blk" : ""); }).join(" ");
+      var ev = l.events.map(function (e) { return eventText(F, e); }).filter(Boolean).join("; ");
+      return '<li class="s' + l.side + ' future" data-k="' + (k + 1) + '"><span class="tlk">' + (l.turn === 0 ? "pre" : "t" + l.turn) + '</span> <b>' + esc(F[l.who].name) + "</b> " + esc(l.skill) + (l.moved ? " <span class=hint>(moved " + l.moved + ")</span>" : "") + (tg ? " → " + tg : "") + (hits ? " <span class=hits>" + hits + "</span>" : "") + (l.dmg ? " = " + short(l.dmg) : "") + (ev ? "<br><span class=hint>" + ev + "</span>" : "") + "</li>";
+    }).join("");
+  }
+  /* show the fight as it stood after action k (0 = before the first) */
+  function seekTo(k, animate) {
+    if (!PLAY) return;
+    var log = PLAY.sample.log, n = log.length;
+    k = Math.max(0, Math.min(n, k)); PLAY.i = k;
+    var F = fightersFlat();
+    if (k === 0) {
+      F.forEach(function (f, i) { hpSet(i, f.sheet.hp, f.sheet.hp, 0); chips(i, []); });
+      VIEW = null; placeTokens(null);
+      $("tlcaption").textContent = "Before the first action. Drag the bar, press play, or step.";
+    } else {
+      var l = log[k - 1], prev = k >= 2 ? log[k - 2] : null;
+      F.forEach(function (f, i) { hpSet(i, l.hp[i], f.sheet.hp, l.sh[i]); chips(i, l.st[i]); });
+      placeTokens({ hp: l.hp, sh: l.sh, pos: l.pos, st: l.st, alive: l.hp.map(function (h) { return h > 0; }) });
+      var actor = document.querySelector('#board .token[data-i="' + l.who + '"]');
+      if (actor) actor.classList.add("acting");
+      (l.targets || []).forEach(function (i) { var t = document.querySelector('#board .token[data-i="' + i + '"]'); if (t) t.classList.add("hit"); });
+      if (l.moved && prev) { var fc = cellAt(prev.pos[l.who][0], prev.pos[l.who][1]); if (fc) fc.classList.add("from"); }
+      if (animate) floats(l, prev);
+      var tg = (l.targets || []).map(function (i) { return F[i].name; }).join(", ");
+      $("tlcaption").textContent = (l.turn === 0 ? "Before battle" : "Turn " + l.turn) + " · " + F[l.who].name + ": " + l.skill + (tg ? " → " + tg : "") + (l.dmg ? " for " + short(l.dmg) : "") + " · " + k + " / " + n;
+    }
+    $("tlrange").value = k;
+    document.querySelectorAll("#tltrack .seg").forEach(function (s) { var sk = +s.getAttribute("data-k"); s.classList.toggle("done", sk <= k); s.classList.toggle("now", sk === k); });
+    document.querySelectorAll("#combatlog li").forEach(function (li) { var lk = +li.getAttribute("data-k"); li.classList.toggle("future", lk > k); li.classList.toggle("now", lk === k); });
+    var cur = document.querySelector('#combatlog li[data-k="' + k + '"]');
+    if (cur) cur.scrollIntoView({ block: "nearest" });
+    $("banner").hidden = !(k === n);
+    if (k === n) $("banner").textContent = PLAY.sample.winner < 0 ? "Undecided at the round cap" : SIDE_NAME[PLAY.sample.winner] + " wins";
+  }
+  /* floating numbers over the tokens for one action */
+  function floats(l, prev) {
+    var F = fightersFlat(), per = {};
+    l.events.forEach(function (e) {
+      if (e.kind === "dmg") per[e.who] = (per[e.who] || []).concat(["−" + short(e.amount)]);
+      if (e.kind === "heal") per[e.who] = (per[e.who] || []).concat(["+" + short(e.amount)]);
+      if (e.kind === "status") per[e.who] = (per[e.who] || []).concat([e.name]);
+      if (e.kind === "down") per[e.who] = (per[e.who] || []).concat(["DOWN"]);
+    });
+    if (prev) F.forEach(function (f, i) { var d = prev.hp[i] - l.hp[i]; if (d > 0 && !(per[i] || []).some(function (x) { return x.charAt(0) === "−"; })) per[i] = (per[i] || []).concat(["−" + short(d)]); });
+    Object.keys(per).forEach(function (i) {
+      var cell = document.querySelector('#board .token[data-i="' + i + '"]');
+      if (!cell) return;
+      var wrap = document.createElement("div"); wrap.className = "floats";
+      per[i].slice(0, 3).forEach(function (txt, k) {
+        var s = document.createElement("span"); s.className = "float" + (txt.charAt(0) === "+" ? " good" : txt.charAt(0) === "−" ? " bad" : " eff"); s.textContent = txt; s.style.animationDelay = (k * 0.15) + "s"; wrap.appendChild(s);
+      });
+      cell.appendChild(wrap);
+    });
+  }
   function later(fn, ms) { var t = setTimeout(fn, Math.max(0, ms)); TIMERS.push(t); return t; }
   function clearTimers() { TIMERS.forEach(clearTimeout); TIMERS = []; }
   function speedMs() { return parseInt($("speed").value, 10); }
-  function stopPlayback() { clearTimers(); if (PLAY) { PLAY.playing = false; PLAY.busy = false; } $("play").innerHTML = "&#9654; Watch the fight"; }
-  function sceneReset() {
-    clearTimers();
-    var F = fightersFlat();
-    F.forEach(function (f, i) { hpSet(i, f.sheet.hp, f.sheet.hp, 0); chips(i, []); });
-    placeTokens(null);
-    $("combatlog").innerHTML = "";
-    $("banner").hidden = true;
-    if (PLAY) { PLAY.i = 0; PLAY.busy = false; }
-  }
-  function applyEntry(l) {
-    var F = fightersFlat();
-    F.forEach(function (f, i) { hpSet(i, l.hp[i], f.sheet.hp, l.sh[i]); chips(i, l.st[i]); });
-    placeTokens({ hp: l.hp, pos: l.pos, alive: l.hp.map(function (h) { return h > 0; }) });
-    document.querySelectorAll("#board .token").forEach(function (t) { t.classList.toggle("acting", +t.getAttribute("data-i") === l.who); });
-    (l.targets || []).forEach(function (i) { var t = document.querySelector('#board .token[data-i="' + i + '"]'); if (t) t.classList.add("hit"); });
-    var tg = (l.targets || []).map(function (i) { return esc(F[i].name); }).join(", ");
-    var hits = l.hits.map(function (h) { return (h.blinded ? "blind" : short(h.d)) + (h.crit ? "!" : "") + (h.block ? " blk" : ""); }).join(" ");
-    var ev = l.events.map(function (e) {
-      if (e.kind === "dmg") return esc(F[e.who].name) + " takes " + short(e.amount) + " from " + esc(e.tag);
-      if (e.kind === "heal") return esc(F[e.who].name) + " heals " + short(e.amount) + (e.tag ? " (" + esc(e.tag) + ")" : "");
-      if (e.kind === "status") return esc(F[e.who].name) + ": " + esc(e.name) + (e.tag ? " (" + esc(e.tag) + ")" : "");
-      if (e.kind === "save") return esc(F[e.who].name) + " survives at 1 HP (" + esc(e.tag) + ")";
-      if (e.kind === "down") return esc(F[e.who].name) + " is down";
-      if (e.kind === "move") return esc(F[e.who].name) + " moves to column " + (e.to[0] + 1) + ", row " + (e.to[1] + 1);
-      return "";
-    }).filter(Boolean).join("; ");
-    var li = document.createElement("li");
-    li.className = "s" + l.side;
-    li.innerHTML = "<b>" + esc(F[l.who].name) + "</b> " + esc(l.skill) + (tg ? " → " + tg : "") + (hits ? " <span class=hits>" + hits + "</span>" : "") + (l.dmg ? " = " + short(l.dmg) : "") + (ev ? "<br><span class=hint>" + ev + "</span>" : "");
-    $("combatlog").appendChild(li);
-    $("combatlog").scrollTop = $("combatlog").scrollHeight;
-  }
-  function stepOnce(done) {
-    if (!PLAY || PLAY.i >= PLAY.sample.log.length) { finish(); return; }
-    var l = PLAY.sample.log[PLAY.i++];
-    applyEntry(l);
-    if (done) done(l);
-  }
-  function finish() {
-    var s = PLAY.sample;
-    $("banner").hidden = false;
-    $("banner").textContent = s.winner < 0 ? "Undecided at the round cap" : SIDE_NAME[s.winner] + " wins";
-    stopPlayback();
-  }
+  function stopPlayback() { clearTimers(); if (PLAY) PLAY.playing = false; $("play").innerHTML = "&#9654; Watch"; }
   function togglePlay() {
     if (!PLAY) return;
     if (PLAY.playing) { stopPlayback(); return; }
-    if (PLAY.i >= PLAY.sample.log.length) sceneReset();
+    if (PLAY.i >= PLAY.sample.log.length) seekTo(0);
     PLAY.playing = true; $("play").innerHTML = "&#10074;&#10074; Pause";
     (function loop() {
       if (!PLAY || !PLAY.playing) return;
-      if (PLAY.i >= PLAY.sample.log.length) { finish(); return; }
-      stepOnce(function (l) {
-        var ms = speedMs();
-        if (ms === 0) loop(); else later(loop, ms * (l.dur || 0.8));
-      });
+      if (PLAY.i >= PLAY.sample.log.length) { stopPlayback(); return; }
+      seekTo(PLAY.i + 1, true);
+      var ms = speedMs(), l = PLAY.sample.log[PLAY.i - 1];
+      if (ms === 0) loop(); else later(loop, ms * (l.dur || 0.8));
     })();
   }
 
@@ -1289,16 +1353,20 @@
   function boot() {
     DATA.skills.forEach(function (s) { SKILL[s.id] = s; });
     if (!loadState()) { TEAM = [[null, null, null, null], [null, null, null, null]]; defaultPositions(); }
-    drawBoard(); boardEvents(); teamEvents();
+    boardEvents(); teamEvents();
     $("run").addEventListener("click", run);
     $("play").addEventListener("click", togglePlay);
-    $("step").addEventListener("click", function () { if (!PLAY) return; PLAY.playing = false; $("play").innerHTML = "&#9654; Watch the fight"; if (PLAY.i >= PLAY.sample.log.length) sceneReset(); stepOnce(); });
+    $("step").addEventListener("click", function () { if (!PLAY) return; stopPlayback(); seekTo(PLAY.i >= PLAY.sample.log.length ? 0 : PLAY.i + 1, true); });
+    $("back").addEventListener("click", function () { if (!PLAY) return; stopPlayback(); seekTo(PLAY.i - 1); });
+    $("tlrange").addEventListener("input", function () { if (!PLAY) return; stopPlayback(); seekTo(parseInt(this.value, 10)); });
+    $("tltrack").addEventListener("click", function (ev) { var s = ev.target.closest ? ev.target.closest(".seg") : null; if (s && PLAY) { stopPlayback(); seekTo(+s.getAttribute("data-k"), true); } });
+    $("combatlog").addEventListener("click", function (ev) { var li = ev.target.closest ? ev.target.closest("li[data-k]") : null; if (li && PLAY) { stopPlayback(); seekTo(+li.getAttribute("data-k"), true); } });
     $("reset").addEventListener("click", function () { try { localStorage.removeItem("pw_team"); } catch (e) {} TEAM = [[null, null, null, null], [null, null, null, null]]; defaultPositions(); PICK = null; invalidate(); });
     $("swap").addEventListener("click", function () {
       TEAM = [TEAM[1], TEAM[0]];
       var p = POS.slice(4).concat(POS.slice(0, 4));
       var mid = GRID.zones[0].y0 + GRID.zones[1].y1;
-      POS = p.map(function (q) { return { x: q.x, y: mid - q.y }; });   /* mirror across the line between the two boxes */
+      POS = p.map(function (q) { return { x: q.x, y: mid - q.y }; });
       saveState(); invalidate();
     });
     $("importbtn").addEventListener("click", function () { importJson($("importtext").value); });
