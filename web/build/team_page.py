@@ -60,10 +60,14 @@ hit, then the shorter walk, then the lowest-HP target, then the nearer aim, then
 Skills with no list of their own use the chain the designers wrote out on the skills that carry one; the
 server's true default is not in the client. The last cast of a turn uses <code>LastAIPriorityTypes</code>,
 which swaps "shorter walk" for "safer cell" (farther from every enemy), unless the skill is flagged
-<code>DontKeepDistance</code>. Walking happens once per turn, before the cast that needs it
-(<code>IsReleaseSkillAfterMove</code>); that single walk is this page's one assumption. A basic attack on an
-adjacent enemy happens when nothing is ready, and a fighter with nothing in reach walks toward the nearest
-enemy. A fallen player keeps its cell (<code>DestroyOnDie = false</code>), so bodies block paths.</p>
+<code>DontKeepDistance</code>. Moves and casts interleave: moving is itself a skill with no cost, no cooldown
+and no use limit (the player prefab's hop, back-step and fixed-speed moves), a cast waits for a move in
+progress and then fires (<code>ActiveSkillWaitActionTypes</code>, <code>IsReleaseSkillAfterMove</code>), and
+nothing in the client counts hops per turn; only <code>MoveDist</code> caps each hop. So every cast here may be
+preceded by a fresh hop from where the fighter now stands, and a caster will step in for one skill and back off
+for its last. A basic attack on an adjacent enemy happens when nothing is ready, and a fighter with nothing in
+reach walks toward the nearest enemy. A fallen player keeps its cell (<code>DestroyOnDie = false</code>), so
+bodies block paths.</p>
 <p><b>Before round 1, and then speed.</b> A Technique marked "Casts once before battle starts"
 (<code>skill.TryAtStartType = AutoAIAtStart</code>: Heart of Challenge, Valor Surge, Gale Dance, Void Blessing)
 fires before the first turn, fastest fighter first, from where it stands, and then sits on its cooldown. A taunt
