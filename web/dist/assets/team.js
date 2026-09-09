@@ -1291,8 +1291,12 @@
     $("tlrange").value = k;
     document.querySelectorAll("#tltrack .seg").forEach(function (s) { var sk = +s.getAttribute("data-k"); s.classList.toggle("done", sk <= k); s.classList.toggle("now", sk === k); });
     document.querySelectorAll("#combatlog li").forEach(function (li) { var lk = +li.getAttribute("data-k"); li.classList.toggle("future", lk > k); li.classList.toggle("now", lk === k); });
-    var cur = document.querySelector('#combatlog li[data-k="' + k + '"]');
-    if (cur) cur.scrollIntoView({ block: "nearest" });
+    /* keep the current line visible inside the log box only; never scroll the page itself */
+    var cur = document.querySelector('#combatlog li[data-k="' + k + '"]'), box = $("combatlog");
+    if (cur) {
+      var top = cur.offsetTop, bottom = top + cur.offsetHeight;
+      if (top < box.scrollTop || bottom > box.scrollTop + box.clientHeight) box.scrollTop = Math.max(0, top - box.clientHeight / 2 + cur.offsetHeight / 2);
+    }
     $("banner").hidden = !(k === n);
     if (k === n) $("banner").textContent = PLAY.sample.winner < 0 ? "Undecided at the round cap" : SIDE_NAME[PLAY.sample.winner] + " wins";
   }

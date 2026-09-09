@@ -922,3 +922,4 @@ svg.abtree circle.nd{fill:var(--faint)} svg.abtree text{font:700 11px var(--body
 }
 .arena.team .board.big{max-width:600px}
 .arena.team .board.big .token .tstat{max-width:190px;flex-wrap:wrap;justify-content:center;row-gap:1px}
+.teamlog .combatlog{position:relative}
