@@ -119,6 +119,9 @@ def skill_ec(ec_entity_id):
             "targetKind": fsc.get("SkillTargetType"),
             "resetCdAtStart": bool(fsc.get("ResetCDAtStart")),
             "limitedTimes": fsc.get("LimitedTimes", -1), "aiPriority": ai,
+            # the AI's ordering for the last skill of a turn, and whether a ranged caster backs off (SkillAiCfg)
+            "aiLast": (fsc.get("Ai") or {}).get("LastAIPriorityTypes") or [],
+            "dontKeepDistance": bool((fsc.get("Ai") or {}).get("DontKeepDistance")),
             "needCondition": bool(fsc.get("NeedConditionStatusMeetToRelease"))}
 
 
