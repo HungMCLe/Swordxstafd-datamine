@@ -822,7 +822,7 @@
       if (skip) {
         if (wantLog) log.push(entry(me, null, -1, [], 0, events, skip.meta.action, 0, moved));
       } else {
-        var reach = reachable(me, me.s.move || GRID.defaultMove), occ = unitAt();
+        var occ = unitAt(), reach = reachable(me, me.s.move || GRID.defaultMove);
         var ready = [];
         me.techs.forEach(function (t, k) {
           if (!t || me.cd[k] !== 0) return;
@@ -833,37 +833,36 @@
         for (var ri = 0; ri < ready.length && me.alive; ri++) {
           var k = ready[ri], cand = me.techs[k], last = ri === ready.length - 1;
           if (!enemiesOf(me).length) break;
-          var pl;
-          if (moved) pl = plan(me, cand.sk, me.pos, occ, last);
-          else {
-            var pm = planWithMove(me, cand.sk, reach, occ, last);
-            if (pm && pm.cell.d > 0) {
-              /* out of place for this cast: walk up to MoveDist, then cast (IsReleaseSkillAfterMove) */
-              moved = walkTo(me, pm.cell); occ = unitAt();
-              if (events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] });
-            }
-            pl = pm ? pm.plan : null;
-          }
-          if (!pl) continue;
-          if (redundant(cand.sk, me, pl.primary)) continue;
+          /* each cast weighs a fresh hop from where the fighter now stands (moves and casts interleave; the
+             client has no per-turn move budget, only MoveDist per hop) */
+          var pm = planWithMove(me, cand.sk, reach, occ, last);
+          if (!pm) continue;
+          if (redundant(cand.sk, me, pm.plan.primary)) continue;
           events = wantLog ? [] : null;
-          var r = cast(cand, k, pl);
+          var hop = 0;
+          if (pm.cell.d > 0) {
+            hop = walkTo(me, pm.cell); moved += hop; occ = unitAt(); reach = reachable(me, me.s.move || GRID.defaultMove);
+            if (events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] });
+          }
+          var r = cast(cand, k, pm.plan);
           casts++;
-          if (wantLog) log.push(entry(me, cand.sk, k, r.rolled, r.total, events, null, sub++, moved, r.targets));
+          if (wantLog) log.push(entry(me, cand.sk, k, r.rolled, r.total, events, null, sub++, hop, r.targets));
         }
         if (casts === 0 && me.alive && enemiesOf(me).length) {
           events = wantLog ? [] : null;
-          var pb = moved ? plan(me, BASIC, me.pos, occ) : null;
-          if (!moved) {
-            var pmb = planWithMove(me, BASIC, reach, occ);
-            if (pmb) { if (pmb.cell.d > 0) { moved = walkTo(me, pmb.cell); occ = unitAt(); if (events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] }); } pb = pmb.plan; }
-            else { moved = approach(me, reach); if (moved && events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] }); }
+          var pmb = planWithMove(me, BASIC, reach, occ, true), hopb = 0, pb = null;
+          if (pmb) {
+            if (pmb.cell.d > 0) { hopb = walkTo(me, pmb.cell); moved += hopb; occ = unitAt(); if (events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] }); }
+            pb = pmb.plan;
+          } else {
+            hopb = approach(me, reach); moved += hopb;
+            if (hopb && events) events.push({ kind: "move", who: me.i, to: [me.pos.x, me.pos.y] });
           }
           if (pb) {
             var rb = cast({ sk: BASIC, rank: 1, level: 1, id: 0, name: BASIC.name }, -1, pb);
             procs(me, "roundCheck", pb.primary, me);
-            if (wantLog) log.push(entry(me, BASIC, -1, rb.rolled, rb.total, events, null, 0, moved, rb.targets));
-          } else if (wantLog) log.push(entry(me, null, -1, [], 0, events, "moved", 0, moved));
+            if (wantLog) log.push(entry(me, BASIC, -1, rb.rolled, rb.total, events, null, 0, hopb, rb.targets));
+          } else if (wantLog) log.push(entry(me, null, -1, [], 0, events, "moved", 0, hopb));
         }
       }
       procs(me, "roundEnd", null, me);
