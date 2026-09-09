@@ -38,7 +38,8 @@ python tools\liveproto\gproto.py decode out\liveproto\streams.json out\liveproto
 Keep what you decode with `roster.py`: it merges every capture into `out/liveproto/roster.json` (one entry
 per player: name, class, level, rank, combat rating, the live `BattleProps`, the full sheet, and a short
 history), prints a table, and exports fighters for the simulators. The site build turns that export into
-`web/dist/assets/fighters.json` (gitignored) for the team battle page, so `combat/team.html` lists every
+`web/dist/assets/fighters.json` for the team battle page (the one derived file that is published, at the
+site owner's request: leaderboard names, classes, ratings, sheets and equipped skills), so `combat/team.html` lists every
 captured top-100 player; a long capture while clicking through the whole list fills it (98 of 100 in one pass).
 
 ```

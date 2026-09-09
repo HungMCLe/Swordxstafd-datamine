@@ -573,11 +573,80 @@
       });
     }
 
+    var me = null, foe = null;
+    /* one cast: hits, rolls, statuses, procs; returns what the log needs */
+    function cast(pick, slot) {
+      var rolled = [], total = 0;
+      if (slot >= 0) procs(me, "skillStart", foe, foe);
+      var meE = eff(me, sides), foeE = eff(foe, sides);
+      meE.hpMax = me.s.hp; foeE.hpMax = foe.s.hp;
+      var rows = pick.id === 0 ? {} : (pick.r[String(me.s.srank)] || {});
+      var parts = hitParts(meE, foeE, pick, rows);
+      var isAttack = !pick.ec || pick.ec.skillType === "Attack" || pick.id === 0;
+      var target = (pick.ec && (pick.ec.target === "Ally" || pick.ec.target === "Me" || pick.ec.target === "Self")) ? me : foe;
+      if (parts.heal) {
+        var before = me.hp; me.hp = Math.min(me.s.hp, me.hp + parts.heal * GOV);
+        if (events) events.push({ kind: "heal", who: me.idx, amount: me.hp - before, tag: pick.name });
+      }
+      if (parts.hits.length && target === foe) total = landHits(parts, me, foe, meE, foeE, pick, rolled);
+      parts.hits.forEach(function (h, hi) {
+        if (rolled[hi] && rolled[hi].blinded) return;
+        h.on.forEach(function (o) {
+          var meta = DATA.statuses[String(o.status)];
+          if (!meta || meta.falloff) return;
+          var tgt = (o.target === "DamageTarget" && target === foe) ? foe : me;
+          var chance = landChance(o.chance, o.byProp, meta.type, meE, foeE);
+          tgt.st.forEach(function (x) {
+            var bo = x.meta.boosts;
+            if (bo && bo.actions.indexOf(meta.action) >= 0 && x.meta.props) {
+              var cs = sides[x.creator].s, r = x.meta.props[String(cs.srank)] || {};
+              if (r[bo.prop]) chance += curveValue(r[bo.prop], cs.srank, cs.slevel, cs.rank.name) / 100;
+            }
+          });
+          if (rng() < chance) {
+            var st = applyStatus(tgt, o.status, me.idx);
+            if (st && meta.shield) {
+              var amt = shieldSize(meta, me, tgt) * GOV;
+              if (amt > 0) tgt.shield = Math.max(tgt.shield, amt);
+            }
+            if (st && events) events.push({ kind: "status", who: tgt.idx, name: statusName(meta) });
+          }
+        });
+      });
+      /* Blind is spent by the first attack skill of the turn */
+      var bl = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
+      if (bl && isAttack) removeStatus(me, bl);
+      if (total > 0) {
+        procs(me, "hit", foe, foe, function (pv) { return !(pv.onlyAttack && !isAttack); });
+        procs(foe, "damaged", me, me);
+      }
+      if (slot >= 0) {
+        me.cd[slot] = cdOf(pick, me.s.srank) + 1; me.uses[slot]++;
+        me.techCasts++;
+        procs(me, "skillEnd", foe, foe, function (pv) { return me.techCasts % pv.every === 0; });
+      }
+      return { rolled: rolled, total: total };
+    }
+
+
+    /* "Casts once before battle starts": every AutoAIAtStart / AutoSelfAtStart Technique fires before round 1,
+       fastest fighter first, and then sits on its cooldown like any other cast */
+    var pre = [];
+    sides.forEach(function (s) { s.load.forEach(function (sk, k) { if (sk && sk.startCast) pre.push({ s: s, k: k }); }); });
+    pre.sort(function (x, y) { return (x.s.t - y.s.t) || (x.s.idx - y.s.idx); });
+    pre.forEach(function (p) {
+      me = p.s; foe = sides[1 - me.idx];
+      if (me.hp <= 0 || foe.hp <= 0) return;
+      events = wantLog ? [] : null;
+      var r0 = cast(me.load[p.k], p.k);
+      if (wantLog) log.push(entry(me, me.load[p.k], p.k, r0.rolled, r0.total, events, "prebattle", 0));
+    });
+
     while (sides[0].hp > 0 && sides[1].hp > 0 && turns < MAXT) {
       if (maxRounds > 0 && Math.min(sides[0].turns, sides[1].turns) >= maxRounds) { capped = true; break; }
       var gap = sides[0].t - sides[1].t;
       var i = Math.abs(gap) < 1e-9 ? (rng() < 0.5 ? 0 : 1) : (gap < 0 ? 0 : 1);
-      var me = sides[i], foe = sides[1 - i];
+      me = sides[i]; foe = sides[1 - i];
       turns++; me.turns++;
       events = wantLog ? [] : null;
 
@@ -595,60 +664,6 @@
       var skip = me.st.filter(function (x) { return SKIP_ACTIONS[x.meta.action]; })[0];
       var frozenCd = me.st.some(function (x) { return x.meta.cdFreeze; });
       if (!frozenCd) for (var c = 0; c < me.cd.length; c++) if (me.cd[c] > 0) me.cd[c]--;
-
-      /* one cast: hits, rolls, statuses, procs; returns what the log needs */
-      function cast(pick, slot) {
-        var rolled = [], total = 0;
-        if (slot >= 0) procs(me, "skillStart", foe, foe);
-        var meE = eff(me, sides), foeE = eff(foe, sides);
-        meE.hpMax = me.s.hp; foeE.hpMax = foe.s.hp;
-        var rows = pick.id === 0 ? {} : (pick.r[String(me.s.srank)] || {});
-        var parts = hitParts(meE, foeE, pick, rows);
-        var isAttack = !pick.ec || pick.ec.skillType === "Attack" || pick.id === 0;
-        var target = (pick.ec && (pick.ec.target === "Ally" || pick.ec.target === "Me" || pick.ec.target === "Self")) ? me : foe;
-        if (parts.heal) {
-          var before = me.hp; me.hp = Math.min(me.s.hp, me.hp + parts.heal * GOV);
-          if (events) events.push({ kind: "heal", who: me.idx, amount: me.hp - before, tag: pick.name });
-        }
-        if (parts.hits.length && target === foe) total = landHits(parts, me, foe, meE, foeE, pick, rolled);
-        parts.hits.forEach(function (h, hi) {
-          if (rolled[hi] && rolled[hi].blinded) return;
-          h.on.forEach(function (o) {
-            var meta = DATA.statuses[String(o.status)];
-            if (!meta || meta.falloff) return;
-            var tgt = (o.target === "DamageTarget" && target === foe) ? foe : me;
-            var chance = landChance(o.chance, o.byProp, meta.type, meE, foeE);
-            tgt.st.forEach(function (x) {
-              var bo = x.meta.boosts;
-              if (bo && bo.actions.indexOf(meta.action) >= 0 && x.meta.props) {
-                var cs = sides[x.creator].s, r = x.meta.props[String(cs.srank)] || {};
-                if (r[bo.prop]) chance += curveValue(r[bo.prop], cs.srank, cs.slevel, cs.rank.name) / 100;
-              }
-            });
-            if (rng() < chance) {
-              var st = applyStatus(tgt, o.status, me.idx);
-              if (st && meta.shield) {
-                var amt = shieldSize(meta, me, tgt) * GOV;
-                if (amt > 0) tgt.shield = Math.max(tgt.shield, amt);
-              }
-              if (st && events) events.push({ kind: "status", who: tgt.idx, name: statusName(meta) });
-            }
-          });
-        });
-        /* Blind is spent by the first attack skill of the turn */
-        var bl = me.st.filter(function (x) { return x.meta.action === "Blinding"; })[0];
-        if (bl && isAttack) removeStatus(me, bl);
-        if (total > 0) {
-          procs(me, "hit", foe, foe, function (pv) { return !(pv.onlyAttack && !isAttack); });
-          procs(foe, "damaged", me, me);
-        }
-        if (slot >= 0) {
-          me.cd[slot] = cdOf(pick, me.s.srank) + 1; me.uses[slot]++;
-          me.techCasts++;
-          procs(me, "skillEnd", foe, foe, function (pv) { return me.techCasts % pv.every === 0; });
-        }
-        return { rolled: rolled, total: total };
-      }
 
       var casts = 0, sub = 0;
       if (skip) {
@@ -681,7 +696,7 @@
     function entry(me, pick, slot, rolled, total, ev, note, sub) {
       var foe = sides[1 - me.idx];
       return { t: Math.round(me.t), side: me.idx, who: WHO[me.idx], slot: slot, sub: sub || 0,
-               skill: pick ? pick.name : (note === "start" ? "—" : note + " — no action"),
+               skill: pick ? (note === "prebattle" ? pick.name + " (before battle)" : pick.name) : (note === "start" ? "—" : note + " — no action"),
                skillId: pick ? pick.id : 0, ele: pick ? pick.ele : "None", hits: rolled, dmg: total,
                dur: pick && pick.ec && pick.ec.dur ? pick.ec.dur : 0.8,
                events: ev || [], turn: me.turns, cd: me.cd.slice(), note: note,

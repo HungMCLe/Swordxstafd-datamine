@@ -59,10 +59,12 @@ If the first ready Technique has no target where the fighter stands, it walks up
 aim among candidates follows the AI's ordering: more targets hit, then the lowest HP. A basic attack on an
 adjacent enemy happens when nothing is ready, and a fighter with nothing in reach at all walks toward the
 nearest enemy. A fallen player keeps its cell (<code>DestroyOnDie = false</code>), so bodies block paths.</p>
-<p><b>Speed decides who goes first, and taunts pull every attack.</b> A taunt such as Heart of Challenge lands
-<i>Ridicule</i> on the enemies it covers, and for as long as that lasts each of them must aim at the taunter,
-walking to it if needed. A skill with a cooldown opens the fight on it, so Heart of Challenge (CD 1) fires on
-its owner's second turn, or the first with a Rapid Cast cut, unless it is a Zero Initial CD skill.</p>
+<p><b>Before round 1, and then speed.</b> A Technique marked "Casts once before battle starts"
+(<code>skill.TryAtStartType = AutoAIAtStart</code>: Heart of Challenge, Valor Surge, Gale Dance, Void Blessing)
+fires before the first turn, fastest fighter first, from where it stands, and then sits on its cooldown. A taunt
+such as Heart of Challenge lands <i>Ridicule</i> on every enemy within three cells, and for as long as that lasts
+each of them must aim at the taunter, walking to it if needed; a fast Paladin therefore soaks the whole opening.
+Every other skill with a cooldown opens the fight on it unless it is a Zero Initial CD skill.</p>
 <p><b>Not modelled.</b> Fantomon ride along off the clock and are untargetable in the real fight; their
 triggered skills are not run here. The end-of-fight rule at the 100-round cap is server-side and unknown, so
 a capped fight is scored by remaining HP. The AI's exact tie-breaks beyond "most hits, lowest HP, nearest"
