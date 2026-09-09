@@ -180,6 +180,9 @@ inferred from testing, or translated by hand.</p>
   <a class="card gold" href="combat/duel.html"><span class="rail"></span>
     <h3>Duel simulator</h3>
     <p>Load two builds and simulate a thousand 1v1 fights on the game&rsquo;s own turn clock.</p></a>
+  <a class="card gold" href="combat/team.html"><span class="rail"></span>
+    <h3>Team battle simulator</h3>
+    <p>Four against four on the battle grid, with real players&rsquo; sheets and equipped skills.</p></a>
   <a class="card gold" href="combat/next-point.html"><span class="rail"></span>
     <h3>Where your next point goes</h3>
     <p>Put your sheet in and see which stat actually buys the most damage &mdash; and where
@@ -289,6 +292,10 @@ inside <code>Console.dll</code> that resolves every point of damage, healing and
   <a class="card gold" href="duel.html"><span class="rail"></span>
     <h3>Duel simulator</h3>
     <p>Eight Techniques a side, the real turn clock and cooldowns, a thousand fights, and the odds.</p>
+    <span class="tag">Interactive</span></a>
+  <a class="card gold" href="team.html"><span class="rail"></span>
+    <h3>Team battle simulator</h3>
+    <p>Four against four on the grid: positions, ranges, the same clock and formula, and the odds.</p>
     <span class="tag">Interactive</span></a>
   <a class="card gold" href="next-point.html"><span class="rail"></span>
     <h3>Where your next point goes</h3>
