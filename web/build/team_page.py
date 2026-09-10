@@ -39,6 +39,11 @@ stat. That block already includes Charm passives (<code>SkillPropChunck</code> a
 <code>CalcSkillPassiveProps</code> into a player's props), so Charms here only fire their procs. Each Technique and
 Charm keeps the rank and level it is equipped at. The leaderboard is the top 100 by combat rating as the server
 listed it, with every player whose sheet has been captured.</p>
+<p><b>Trying another setup.</b> Tap any Technique or Charm on a team card to swap it for another from the
+fighter's class line (or from any class), to clear the slot, or to set the rank and level it is equipped at.
+The sheet stays the captured one: Charm passives are already folded into a player's <code>BattleProps</code>,
+so a swapped Charm changes what it fires during the fight but not the standing stats. A changed loadout is
+marked <i>edited</i> on the card and can be put back with &#8635;; edits live in this browser only.</p>
 <p><b>The board is the game's.</b> Team Challenge 4v4 (stage 9998) fights on battlefield 910: a 21 by 20 grid,
 Y up, distance counted in cells (<code>Pos2d.Distance</code> is Manhattan). Each side deploys inside a 5-wide,
 4-deep box around its entry cell (<code>stage.TeamChangePosRange = {5, 4}</code>: columns 9&ndash;13, rows
@@ -205,8 +210,12 @@ def render(layout, base_tables, dist: Path, out: Path):
         fighters_url = "../assets/fighters.json"
 
     grid = grid_from_prefab()
+    sk_data, _class_icon, class_tree = duel_page.class_data(out, dist)
     cfg = json.dumps({"ranks": ranks, "minCrit": 1.3, "minBlock": 1.5, "pvp": pvpgov, "speedScale": spd_scale,
-                      "v": _b.asset_v(), "grid": grid, "fightersUrl": fighters_url}, ensure_ascii=False).replace("</", "<\\/")
+                      "v": _b.asset_v(), "grid": grid, "fightersUrl": fighters_url,
+                      # the class line and the skill-rank labels, for the loadout picker on each team card
+                      "classTree": class_tree, "rankLabels": sk_data["rankLabels"], "rankQuality": sk_data["rankQuality"]},
+                     ensure_ascii=False).replace("</", "<\\/")
 
     def team(side, label):
         return f"""
@@ -222,7 +231,8 @@ def render(layout, base_tables, dist: Path, out: Path):
 <p class="lede">Four against four on the game's grid. Drag players off the live top-100 leaderboard into either
 team, place them on their half of the board, then run a thousand fights or watch one play out on the turn clock.
 Every fighter carries the sheet the server reports for that player and the Techniques and Charms they have
-equipped, each at its own rank and level.</p>
+equipped, each at its own rank and level. Tap any skill on a team card to swap it, clear it, or change its rank
+and level, and try a setup the player does not run today.</p>
 
 <div class="arena team" id="arena">
   <section class="stage">
@@ -274,6 +284,27 @@ equipped, each at its own rank and level.</p>
     <div class="lb" id="lb"></div>
   </section>
 </div>
+
+<dialog id="skpick" class="picker">
+  <div class="sktitle" id="sktitle"></div>
+  <div class="pickhead">
+    <input type="search" id="skfind" placeholder="Search&hellip;" autocomplete="off">
+    <button type="button" id="skclear" class="pickbtn">Clear slot</button>
+    <button type="button" id="skclose" class="pickbtn">Close</button>
+  </div>
+  <div class="pickrl">
+    <label>Rank <select id="skrank" aria-label="Skill rank"></select></label>
+    <label>Level <input type="number" id="sklevel" min="1" max="500" value="1" aria-label="Skill level"></label>
+    <span class="hint">the rank and level this slot is equipped at; a change applies to the slot at once</span>
+  </div>
+  <div class="pickfilters">
+    <select id="skclass" aria-label="Filter by class"></select>
+    <select id="skele" aria-label="Filter by element"><option value="">Any element</option><option>Physical</option>
+      <option>Wind</option><option>Water</option><option>Fire</option><option>Light</option><option>Dark</option></select>
+    <span id="skcount" class="pickcount"></span>
+  </div>
+  <div id="sklist" class="picklist"></div>
+</dialog>
 
 <div id="detail" hidden>
   <h3>The fight above, as a table</h3>
