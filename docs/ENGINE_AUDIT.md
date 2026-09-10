@@ -102,7 +102,11 @@ Status codes: **V** verified in client code or data · **O** observed in real fi
 | D16 | Dodge: the target's `DodgePercent`, rolled per hit. Only status 24209 (Void Bubble) grants it in this data, and it did nothing before the second pass | V | status 24209 props |
 | D17 | `StatusDmgAddPer` (src) and `StatusDmgVulnerablePer` (tgt) multiply, `StatusDmgReducePer` (tgt) divides, as their own stage after the percent block — not folded into DmgAddPercent/DmgReducePercent | V | `Damage()`; 17/5/10 statuses carry them |
 | D18 | flat `CritPower` added and flat `BlockValue` subtracted inside the additive term when the hit crits or is blocked, before the skill coefficient and under the same 90% floor | V | `Damage()` num3. Nothing in this data carries either (98 sheets, 138 statuses at every rank, 322 skills, 68 trigger skills all scanned), so the path is exercised by an injected test rather than by live data: a crit gains exactly `CritPower` times the per-point value of any flat add, a block loses exactly `BlockValue` times it, and a `BlockValue` larger than the hit leaves 10% of the base |
-| D19 | profession damage scales (`ZhanshiDmgAddScale` and kin), `FinalDamageScale`, `FinalCharacterDamageScale`, `SkillDmgAddPerByTargetHp`, distance bonuses, cooking finals | M | `Damage()`; every one is zero or absent across all 98 captured sheets |
+| D19 | defence ignore, percent and flat (`StatusIgnoreDefence`, `FixedStatusIgnoreDefence`), applied to the target's Defence before the attack-over-attack-plus-defence term | V | `Damage()`; nothing in the data carries either, so it is covered by an injected test |
+| D19b | `FinalDamageScale` and `FinalCharacterDamageScale`, the latter because a PvP target is always a character | V | same; injected test |
+| D19c | the missing-HP bonus: `floor(missing fraction / SkillTargetReduceHpPer)` steps of `SkillDmgUnitAddPer`, capped at `SkillDmgMaxAddPer`, then `SkillDmgAddPerByTargetHp` times the target's max HP, both after the crit and block steps | V | same; injected test drives a wounded target and matches the ratio exactly |
+| D19d | profession damage scales (`ZhanshiDmgAddScale` and kin) | M | the switch in `Damage()` has a case only for the six base professions; every captured fighter is an advanced class (Dunjiashi, Modaoshi, Kuangzhanshi, Mishushi), so the term is structurally zero for them whatever the props say |
+| D19e | cooking finals (17 properties), distance bonuses, monster and large-target bonuses | M | food buffs appear on no captured sheet; the unit of `info.Distance` is not verifiable from the client; the monster terms need a monster target |
 | D20 | level offset and rank offset damage | — | `Damage()` applies both only when `!IsPvp`; this is PvP |
 | D21 | combat-rating suppression | M | `IsCombatRatingSuppressionEfective` returns true in PvP, but the value comes from the battle setup and the config table (`fight_combat_rating_suppression`) is keyed by target level against a recommended power, i.e. the PvE band mechanic; the PvP balancer we do model is the governor |
 
@@ -137,8 +141,14 @@ more damage than expected, and whether the damage pipeline is really the client'
 - **The three status-damage props** now form their own multiplicative stage instead of being folded into the
   DmgAddPercent / DmgReducePercent block.
 - **Flat Crit Power and flat Block Value** now join the additive term on a crit and a block, as `Damage()` does.
-  No sheet or status in the captured data carries either, so they are verified by injection rather than by a live
-  fight; the odds over 1,000 fights are unchanged.
+- **Defence ignore, the two final scales and the missing-HP bonus** are in as well, so every term `Damage()`
+  applies to a player-versus-player hit is now modelled except the five noted at D19d and D19e.
+- None of those properties appears anywhere in the captured data (98 sheets, 138 statuses at every rank, 322
+  skills, 68 trigger skills were scanned), so they are covered by injected tests rather than by a live fight:
+  eight checks, each comparing against the figure `Damage()` gives, including the 90% floor and a wounded target
+  earning exactly one step of the missing-HP bonus. Odds over 1,000 fights are unchanged.
+- Properties now carried from a captured sheet through the exporter and the engine, so a later capture that does
+  contain them works rather than silently dropping them.
 - **The damage pipeline was re-derived term by term against `Damage()`** and matches, including the elemental
   divisor split, the two per-rank PvP scalers and where each sits, the additive term's 90% floor, and the crit and
   block multipliers with their avoid terms. The large hits are real: at Champion I a Meteoric Flames from an

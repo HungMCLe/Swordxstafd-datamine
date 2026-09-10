@@ -57,6 +57,10 @@
     DmgVulnerable: "vuln",
     /* CalcDamageTypeImpl rolls the target's DodgePercent and the attacker's BlindingPercent per hit */
     DodgePercent: "dodge", BlindingPercent: "blind",
+    /* the remaining Damage() terms: defence ignore, the two final scales, the missing-HP bonus */
+    StatusIgnoreDefence: "defignore", FinalDamageScale: "finaldmg", FinalCharacterDamageScale: "finalchar",
+    SkillDmgAddPerByTargetHp: "dmgbytargethp", SkillTargetReduceHpPer: "exstep",
+    SkillDmgUnitAddPer: "exunit", SkillDmgMaxAddPer: "exmax",
     CureAddPercent: "cureadd"
   };
   var PROP2ELE = {};
@@ -72,8 +76,10 @@
                     FixedStatusDmgReduce: "fred", FixedDmgReduce: "fred", DmgReduce: "fred",
                     FixedDmgVulnerable: "fvuln", FixedstatusDmgVulnerable: "fvuln",
                     /* the flat damage forms, which join the additive term only on a crit or a block */
-                    CritPower: "critpowerv", BlockValue: "blockvaluev" };
-  var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "blockavoid", "pvpadd", "pvpres", "cureadd", "becureadd", "finalcure", "dodge", "blind", "vuln", "sadd", "sred", "svuln"];
+                    CritPower: "critpowerv", BlockValue: "blockvaluev",
+                    FixedStatusIgnoreDefence: "defignorev" };
+  var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "blockavoid", "pvpadd", "pvpres", "cureadd", "becureadd", "finalcure", "dodge", "blind", "vuln", "sadd", "sred", "svuln",
+                    "defignore", "finaldmg", "finalchar", "dmgbytargethp", "exstep", "exunit", "exmax"];
 
   /* fold one prop row (a status's numbers) into a working sheet, in percent units */
   function foldProps(e, row, srank, slevel, rank) {
@@ -100,7 +106,9 @@
     var s = { rank: rank, vuln: 0, fadd: 0, fred: 0, fvuln: 0, aff: {}, aegis: {} };
     ["hp", "atk", "def", "spd", "mast", "kfm", "eres", "kfr", "erate", "edodge", "move",
      "cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "blockavoid", "pvpadd", "pvpres", "cureadd",
-     "becureadd", "finalcure", "dodge", "crv", "crav", "bv", "bav", "cureaddv", "becureaddv", "critpowerv", "blockvaluev"]
+     "becureadd", "finalcure", "dodge", "blind", "sadd", "sred", "svuln",
+     "defignore", "finaldmg", "finalchar", "dmgbytargethp", "exstep", "exunit", "exmax",
+     "crv", "crav", "bv", "bav", "cureaddv", "becureaddv", "critpowerv", "blockvaluev", "defignorev"]
       .forEach(function (k) { s[k] = f.sheet[k] || 0; });
     /* CalcDamageTypeImpl: the flat value forms join their percent divided by the same side's base */
     if (rank.BaseCritRatePercentValue > 0) s.cr += s.crv / rank.BaseCritRatePercentValue;
@@ -160,7 +168,11 @@
     var pct = (1 + att.boost + (att.pvpadd || 0) + def.vuln) / Math.max(0.1, 1 + def.dmgres + (def.pvpres || 0));
     /* Damage(): num2 *= 1 + StatusDmgAddPer(src) + StatusDmgVulnerablePer(tgt); num2 /= max(0.1, 1 + StatusDmgReducePer(tgt)) */
     pct *= (1 + (att.sadd || 0) + (def.svuln || 0)) / Math.max(0.1, 1 + (def.sred || 0));
-    var defTerm = att.atk / (att.atk + def.def);
+    /* FinalDamageScale, and FinalCharacterDamageScale because a PvP target is always a character */
+    pct *= (1 + (att.finaldmg || 0)) * (1 + (att.finalchar || 0));
+    /* Damage(): the target's Defence first loses the attacker's percent and flat defence ignore */
+    var defUsed = Math.max(0, def.def - def.def * (att.defignore || 0) - (att.defignorev || 0));
+    var defTerm = att.atk / (att.atk + defUsed);
     var psdr = 1 + (def.rank.PlayerSkillDmgReduceScale || 0) / 10000;
     var prosdr = 1 + (def.rank.ProSkillDmgReduceScale || 0) / 10000;
     var pvp = (sk.pvp || 10000) / 10000;
@@ -811,6 +823,14 @@
         if (blinded || dodged) d = 0;
         else if (block) d /= bd;
         else if (crit) d *= m;
+        if (d > 0) {
+          /* Damage() tail: a bonus per step of the target's missing HP, capped, then a share of its max HP */
+          if (meE.exstep > 0) {
+            var units = Math.floor((foe.s.hp - foe.hp) / foe.s.hp / meE.exstep);
+            if (units > 0) d *= 1 + Math.min(meE.exmax || 0, (meE.exunit || 0) * units);
+          }
+          if (meE.dmgbytargethp) d += meE.dmgbytargethp * foe.s.hp;
+        }
         if (foe.shield > 0 && !h.ignoreShield && d > 0) {
           absorbed = Math.min(foe.shield, d); foe.shield -= absorbed; d -= absorbed;
           if (foe.shield <= 0) foe.st.filter(function (x) { return x.meta.shield; }).forEach(function (x) { removeStatus(foe, x); });
