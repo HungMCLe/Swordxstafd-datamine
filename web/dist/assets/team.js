@@ -159,12 +159,16 @@
     var ele = sk.ele || "None";
     var elemental = ele !== "Physical" && ele !== "None";
     var mast = elemental ? att.mast : att.kfm;
-    var aff = elemental ? (att.aff[ele] || 0) : 0;
+    /* Damage(): for ElementType.None the Affinity term is the mean of the five elemental Affinities and the
+       Aegis term the mean of the five elemental resistances, over the same bases as an elemental hit */
+    var mean = function (m) { return ELES.reduce(function (a, e) { return a + (m[e] || 0); }, 0) / ELES.length; };
+    var aff = elemental ? (att.aff[ele] || 0) : mean(att.aff);
+    var aeg = elemental ? (def.aegis[ele] || 0) : mean(def.aegis);
     var foeMasterBase = elemental ? def.rank.BaseElementResistance : def.rank.BaseKongFuResistance;
     var myMasterBase = elemental ? att.rank.BaseElementMaster : att.rank.BaseKongFuMaster;
     var res = elemental ? def.eres : def.kfr;
     var eNum = 1 + aff / def.rank.BaseElementReduce + mast / foeMasterBase;
-    var eDen = 1 + (elemental ? (def.aegis[ele] || 0) / att.rank.BaseElementAdd : 0) + res / myMasterBase;
+    var eDen = 1 + aeg / att.rank.BaseElementAdd + res / myMasterBase;
     var pct = (1 + att.boost + (att.pvpadd || 0) + def.vuln) / Math.max(0.1, 1 + def.dmgres + (def.pvpres || 0));
     /* Damage(): num2 *= 1 + StatusDmgAddPer(src) + StatusDmgVulnerablePer(tgt); num2 /= max(0.1, 1 + StatusDmgReducePer(tgt)) */
     pct *= (1 + (att.sadd || 0) + (def.svuln || 0)) / Math.max(0.1, 1 + (def.sred || 0));
