@@ -84,6 +84,7 @@ Status codes: **V** verified in client code or data · **O** observed in real fi
 
 | # | Rule | Status | Evidence |
 |---|---|---|---|
+| D0 | a non-elemental hit (`ElementType.None`, which this site labels Physical) takes the **mean of the five** Affinities on the attacker and the mean of the five elemental resistances on the target, over the same bases as an elemental hit; only Mastery switches to the KongFu pair | V | `Damage()` switch. The engine was using zero for both terms, which is wrong for 38% of the equipped Techniques, Eclipse Slash and Sunset Sword among them. The two missing terms largely cancel, so the error per matchup ran from about -7% to +25% rather than the halving a first look suggested |
 | D1 | `Damage()` pipeline: (ATK × coef / psdr + flat) × ATK/(ATK+DEF) × elemental ratio × percent block / prosdr × PvpPropScale; 90% floor on flat adds | V | `BattleFormulaHandler.Damage` |
 | D2 | roll order per hit: the attacker's `BlindingPercent`, then the target's `DodgePercent`, then block, then crit; a blinded or dodged hit deals 0 and applies no status; a blocked hit never crits | V | `CalcDamageTypeImpl`, `Damage()` early returns (fixed in the second pass: Blind was a guaranteed miss for a whole cast, Dodge was never rolled) |
 | D3 | crit chance = 0.05 + (CritRatePercent + CritRatePercentValue/Base) − (CritAvoidPercent + CritAvoidPercentValue/Base); mult = max(1.3, 1 + CritPowerPercent − crit avoid) | V | same |
@@ -125,6 +126,13 @@ Status codes: **V** verified in client code or data · **O** observed in real fi
 | S9 | modelled Charm components: HitSkill, DamageSkill, RoundStart, RoundEnd, RoundCheck, SkillStart, SkillEnd (every Nth cast), HpDecreaseUnit/HpIncreaseUnit, HpBelow, HpLimit (death save), StatusStackCount, StatusApplyTargetHandle, DoDamageHandle, HitDmgAddPer, RoleDie (revive), DamageCustom (reflect), MoveNear (proximity and grid items), ActionEnd, HitCustomCure (lifesteal), KillSkill, ActionExist | V | `out/ec_decoded` components; `web/build/ec_data.py` |
 | S10 | grid-item statuses count on the creator's rounds and vanish with the creator | V | `RoundTarget Creator`, `StatusAutoRemove.RemoveAtRoundTargetDie` |
 | S11 | Fantomon (pets) | M | off the clock (`FollowMaster`), untargetable; not run |
+
+## Third pass, 2026-09-09: non-elemental damage
+
+A physical hit was losing both of its elemental terms. `Damage()` treats `ElementType.None` like any other
+element except that the Affinity and Aegis figures are the mean of the five, and Mastery uses the KongFu pair.
+The engine set both to zero. Fixed in both engines; elemental hits are byte-identical afterwards, and the
+injected tests still pass. See D0.
 
 ## Second pass, 2026-09-09 (user-reported)
 

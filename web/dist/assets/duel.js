@@ -164,11 +164,13 @@
     var ec = sk.ec || null;
     var elemental = sk.ele !== "Physical" && sk.ele !== "None";
     var mast = elemental ? att.mast : att.kfm;
-    var aff = elemental ? att.aff : 0;
+    /* Damage(): a non-elemental hit uses the mean of the five Affinities and the mean of the five elemental
+       resistances. This page carries a single figure for each, which is that mean when all five match. */
+    var aff = att.aff;
     var foeMasterBase = elemental ? def.rank.BaseElementResistance : def.rank.BaseKongFuResistance;
     var myMasterBase = elemental ? att.rank.BaseElementMaster : att.rank.BaseKongFuMaster;
     var eNum = 1 + aff / def.rank.BaseElementReduce + mast / foeMasterBase;
-    var eDen = 1 + (elemental ? def.aegis / att.rank.BaseElementAdd : 0) + def.eres / myMasterBase;
+    var eDen = 1 + def.aegis / att.rank.BaseElementAdd + def.eres / myMasterBase;
     var pct = (1 + att.boost + (att.pvpadd || 0) + def.vuln) / Math.max(0.1, 1 + def.dmgres + (def.pvpres || 0));
     /* Damage(): the three status-damage props are their own stage */
     pct *= (1 + (att.sadd || 0) + (def.svuln || 0)) / Math.max(0.1, 1 + (def.sred || 0));
