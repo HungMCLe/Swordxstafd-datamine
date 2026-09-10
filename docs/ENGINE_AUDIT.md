@@ -101,7 +101,7 @@ Status codes: **V** verified in client code or data · **O** observed in real fi
 | D15 | Blind is a *chance*: the status grants its holder `BlindingPercent` 50% for one Technique (`DurationSkillCount` 1), rolled per hit | V | status 24234 props; `CalcDamageTypeImpl` |
 | D16 | Dodge: the target's `DodgePercent`, rolled per hit. Only status 24209 (Void Bubble) grants it in this data, and it did nothing before the second pass | V | status 24209 props |
 | D17 | `StatusDmgAddPer` (src) and `StatusDmgVulnerablePer` (tgt) multiply, `StatusDmgReducePer` (tgt) divides, as their own stage after the percent block — not folded into DmgAddPercent/DmgReducePercent | V | `Damage()`; 17/5/10 statuses carry them |
-| D18 | flat `CritPower` added and flat `BlockValue` subtracted inside the additive term when the hit crits or is blocked | M | `Damage()` num3; no fighter sheet and no status in this data carries either, so the term is always zero |
+| D18 | flat `CritPower` added and flat `BlockValue` subtracted inside the additive term when the hit crits or is blocked, before the skill coefficient and under the same 90% floor | V | `Damage()` num3. Nothing in this data carries either (98 sheets, 138 statuses at every rank, 322 skills, 68 trigger skills all scanned), so the path is exercised by an injected test rather than by live data: a crit gains exactly `CritPower` times the per-point value of any flat add, a block loses exactly `BlockValue` times it, and a `BlockValue` larger than the hit leaves 10% of the base |
 | D19 | profession damage scales (`ZhanshiDmgAddScale` and kin), `FinalDamageScale`, `FinalCharacterDamageScale`, `SkillDmgAddPerByTargetHp`, distance bonuses, cooking finals | M | `Damage()`; every one is zero or absent across all 98 captured sheets |
 | D20 | level offset and rank offset damage | — | `Damage()` applies both only when `!IsPvp`; this is PvP |
 | D21 | combat-rating suppression | M | `IsCombatRatingSuppressionEfective` returns true in PvP, but the value comes from the battle setup and the config table (`fight_combat_rating_suppression`) is keyed by target level against a recommended power, i.e. the PvE band mechanic; the PvP balancer we do model is the governor |
@@ -136,6 +136,9 @@ more damage than expected, and whether the damage pipeline is really the client'
   `CalcDamageTypeImpl`, on the target's `DodgePercent` and the attacker's `BlindingPercent` respectively.
 - **The three status-damage props** now form their own multiplicative stage instead of being folded into the
   DmgAddPercent / DmgReducePercent block.
+- **Flat Crit Power and flat Block Value** now join the additive term on a crit and a block, as `Damage()` does.
+  No sheet or status in the captured data carries either, so they are verified by injection rather than by a live
+  fight; the odds over 1,000 fights are unchanged.
 - **The damage pipeline was re-derived term by term against `Damage()`** and matches, including the elemental
   divisor split, the two per-rank PvP scalers and where each sits, the additive term's 90% floor, and the crit and
   block multipliers with their avoid terms. The large hits are real: at Champion I a Meteoric Flames from an

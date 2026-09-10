@@ -44,7 +44,8 @@
     BlockPercentValue: ["blockrate", "BaseBlockPercentValue"]
   };
   /* flat additive block of Damage(): (adds - reduces) x coef, floored at -90% of base */
-  var PROP2FLAT = { FixedStatusDmgAdd: "fadd", FixedDmgAdd: "fadd", DmgAdd: "fadd",
+  var PROP2FLAT = { CritPower: "critpowerv", BlockValue: "blockvaluev",
+                    FixedStatusDmgAdd: "fadd", FixedDmgAdd: "fadd", DmgAdd: "fadd",
                     FixedStatusDmgReduce: "fred", FixedDmgReduce: "fred", DmgReduce: "fred",
                     FixedDmgVulnerable: "fvuln", FixedstatusDmgVulnerable: "fvuln" };
   var UNMODELLED = {
@@ -175,10 +176,17 @@
     }
     function one(coef, withFlat, on, ignoreShield, at, pvpH, govH, flatH) {
       var base = (att.atk * coef / psdr + (withFlat ? (flatH === undefined ? flat : flatH) : 0)) * defTerm;
-      var add = ((att.fadd || 0) + (def.fvuln || 0) - (def.fred || 0)) * coef / psdr;
-      add = Math.max(-0.9 * base, add);              /* FixedDmgLimitPercent */
-      out.hits.push({ d: (base + add) / prosdr * (eNum / eDen) * pct * (pvpH === undefined ? pvp : pvpH), on: on || [],
-                      ignoreShield: !!ignoreShield, at: at || 0, gov: govH });
+      var flatSum = (att.fadd || 0) + (def.fvuln || 0) - (def.fred || 0);
+      /* Damage() num3, floored at minus FixedDmgLimitPercent of the base; the attacker's flat Crit Power joins it
+         on a crit and the target's flat Block Value leaves it on a block */
+      function done(extra) {
+        var add = Math.max(-0.9 * base, (flatSum + extra) * coef / psdr);
+        return (base + add) / prosdr * (eNum / eDen) * pct * (pvpH === undefined ? pvp : pvpH);
+      }
+      var hit = { d: done(0), on: on || [], ignoreShield: !!ignoreShield, at: at || 0, gov: govH };
+      if (att.critpowerv) hit.dc = done(att.critpowerv);
+      if (def.blockvaluev) hit.db = done(-def.blockvaluev);
+      out.hits.push(hit);
     }
     if (ec && ec.hits && ec.hits.length) {
       /* HitDamageType.None: the hit lands (statuses, child skills) but CalcDamageType computes nothing for it,
@@ -575,7 +583,13 @@
       parts.hits.forEach(function (h) {
         if (!(h.d > 0)) { if (rolled) rolled.push({ d: 0, crit: false, block: false, absorbed: 0, blinded: false, at: h.at || 0, saved: false, skipped: true }); return; }
         var gated = h.gov === undefined ? pick.gov !== false : h.gov;         /* ScaleDamage: AffectedBySkillRank */
-        var d = h.d * (gated ? GOV : 1), crit = false, block = false, absorbed = 0, blinded = false, dodged = false;
+        /* CalcDamageTypeImpl: the attacker's Blind chance, the target's Dodge, then block, then crit when not blocked */
+        var blinded = blindPct > 0 && rng() < blindPct;
+        var dodged = !blinded && dodgePct > 0 && rng() < dodgePct;
+        var block = rng() < b;
+        var crit = !block && rng() < p;
+        var d = (crit && h.dc !== undefined ? h.dc : block && h.db !== undefined ? h.db : h.d) * (gated ? GOV : 1);
+        var absorbed = 0;
         var fo = null;
         h.on.forEach(function (o) { var mt = DATA.statuses[String(o.status)]; if (mt && mt.falloff) fo = mt.falloff; });
         if (fo) {
@@ -585,10 +599,9 @@
           d *= Math.pow(1 - fo.pct, steps);
           fallCount++;
         }
-        if (blindPct > 0 && rng() < blindPct) { d = 0; blinded = true; }
-        else if (dodgePct > 0 && rng() < dodgePct) { d = 0; dodged = true; }
-        else if (rng() < b) { d /= bd; block = true; }
-        else if (rng() < p) { d *= m; crit = true; }
+        if (blinded || dodged) d = 0;
+        else if (block) d /= bd;
+        else if (crit) d *= m;
         if (foe.shield > 0 && !h.ignoreShield && d > 0) {
           absorbed = Math.min(foe.shield, d); foe.shield -= absorbed; d -= absorbed;
           if (foe.shield <= 0) foe.st.filter(function (x) { return x.meta.shield; }).forEach(function (x) { removeStatus(foe, x); });
