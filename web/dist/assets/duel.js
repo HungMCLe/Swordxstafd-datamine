@@ -13,7 +13,9 @@
   var FIELDS = ["hp", "atk", "def", "spd", "mast", "kfm", "aff", "eres", "aegis",
                 "cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "acc", "erate", "edodge",
                 "pvpadd", "pvpres"];
-  var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "pvpadd", "pvpres", "blind", "sadd", "sred", "svuln"];
+  var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "pvpadd", "pvpres",
+                    "blind", "dodge", "vuln", "sadd", "sred", "svuln",
+                    "defignore", "finaldmg", "finalchar", "dmgbytargethp", "exstep", "exunit", "exmax"];
   var A_COL = "#b8863b", B_COL = "#3d6ea8";
   var SIDE = ["a", "b"], WHO = ["You", "Opponent"];
 
@@ -32,8 +34,15 @@
     LightDamageReduce: "aegis", DarkDamageReduce: "aegis",
     FinalDamageReducePercent: "dmgres", EffectRate: "erate", EffectDodge: "edodge",
     /* the status-written variants of the percentage block */
-    StatusDmgAddPer: "boost", StatusDmgReducePer: "dmgres", DmgVulnerable: "vuln",
-    StatusDmgVulnerablePer: "vuln"
+    /* Damage() applies these three on their own stage, not inside the DmgAddPercent block */
+    StatusDmgAddPer: "sadd", StatusDmgReducePer: "sred", StatusDmgVulnerablePer: "svuln",
+    DmgVulnerable: "vuln",
+    /* CalcDamageTypeImpl rolls the target's DodgePercent and the attacker's BlindingPercent per hit */
+    DodgePercent: "dodge", BlindingPercent: "blind",
+    /* the remaining Damage() terms: defence ignore, the two final scales, the missing-HP bonus */
+    StatusIgnoreDefence: "defignore", FinalDamageScale: "finaldmg", FinalCharacterDamageScale: "finalchar",
+    SkillDmgAddPerByTargetHp: "dmgbytargethp", SkillTargetReduceHpPer: "exstep",
+    SkillDmgUnitAddPer: "exunit", SkillDmgMaxAddPer: "exmax"
   };
   /* multiplicative scales statuses apply to the main stats */
   var PROP2SCALE = { AttackScale: "atk", DefenceScale: "def", MaxHpScale: "hp", SpeedScale: "spd" };
@@ -44,7 +53,7 @@
     BlockPercentValue: ["blockrate", "BaseBlockPercentValue"]
   };
   /* flat additive block of Damage(): (adds - reduces) x coef, floored at -90% of base */
-  var PROP2FLAT = { CritPower: "critpowerv", BlockValue: "blockvaluev",
+  var PROP2FLAT = { CritPower: "critpowerv", BlockValue: "blockvaluev", FixedStatusIgnoreDefence: "defignorev",
                     FixedStatusDmgAdd: "fadd", FixedDmgAdd: "fadd", DmgAdd: "fadd",
                     FixedStatusDmgReduce: "fred", FixedDmgReduce: "fred", DmgReduce: "fred",
                     FixedDmgVulnerable: "fvuln", FixedstatusDmgVulnerable: "fvuln" };
@@ -89,7 +98,9 @@
   function sheet(side) {
     var r = C.ranks[parseInt($(side + "_rank").value, 10)] || C.ranks[0];
     var s = { rank: r, srank: Math.round(n(side + "_srank")), slevel: Math.round(n(side + "_slevel")),
-              vuln: 0, fadd: 0, fred: 0, fvuln: 0, charmAdds: {}, ignored: {} };
+              vuln: 0, fadd: 0, fred: 0, fvuln: 0, charmAdds: {}, ignored: {},
+              blind: 0, dodge: 0, sadd: 0, sred: 0, svuln: 0, critpowerv: 0, blockvaluev: 0, defignorev: 0,
+              defignore: 0, finaldmg: 0, finalchar: 0, dmgbytargethp: 0, exstep: 0, exunit: 0, exmax: 0 };
     FIELDS.forEach(function (f) { s[f] = n(side + "_" + f); });
     /* Charms are passive stats: CalcSkillPassiveProps, added to the typed sheet */
     LOAD[side].slice(TECH).forEach(function (ch) {
@@ -161,7 +172,11 @@
     var pct = (1 + att.boost + (att.pvpadd || 0) + def.vuln) / Math.max(0.1, 1 + def.dmgres + (def.pvpres || 0));
     /* Damage(): the three status-damage props are their own stage */
     pct *= (1 + (att.sadd || 0) + (def.svuln || 0)) / Math.max(0.1, 1 + (def.sred || 0));
-    var defTerm = att.atk / (att.atk + def.def);
+    /* FinalDamageScale, and FinalCharacterDamageScale because a PvP target is always a character */
+    pct *= (1 + (att.finaldmg || 0)) * (1 + (att.finalchar || 0));
+    /* Damage(): the target's Defence first loses the attacker's percent and flat defence ignore */
+    var defUsed = Math.max(0, def.def - def.def * (att.defignore || 0) - (att.defignorev || 0));
+    var defTerm = att.atk / (att.atk + defUsed);
     /* this is a player hitting a player: Damage() divides by the target's two
        per-rank PvP scalers, and the few skills with a PvpPropScale shrink too */
     var psdr = 1 + (def.rank.PlayerSkillDmgReduceScale || 0) / 10000;
@@ -602,6 +617,14 @@
         if (blinded || dodged) d = 0;
         else if (block) d /= bd;
         else if (crit) d *= m;
+        if (d > 0) {
+          /* Damage() tail: a bonus per step of the target's missing HP, capped, then a share of its max HP */
+          if (meE.exstep > 0) {
+            var units = Math.floor((foe.s.hp - foe.hp) / foe.s.hp / meE.exstep);
+            if (units > 0) d *= 1 + Math.min(meE.exmax || 0, (meE.exunit || 0) * units);
+          }
+          if (meE.dmgbytargethp) d += meE.dmgbytargethp * foe.s.hp;
+        }
         if (foe.shield > 0 && !h.ignoreShield && d > 0) {
           absorbed = Math.min(foe.shield, d); foe.shield -= absorbed; d -= absorbed;
           if (foe.shield <= 0) foe.st.filter(function (x) { return x.meta.shield; }).forEach(function (x) { removeStatus(foe, x); });

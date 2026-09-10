@@ -17,14 +17,21 @@ PCT = {"CritRatePercent": "cr", "CritPowerPercent": "cd", "CritAvoidPercent": "c
        "BlockValuePercent": "blockeff", "BlockAvoidPercent": "blockavoid", "DmgAddPercent": "boost",
        "DmgReducePercent": "dmgres", "PlayerDmgAddScale": "pvpadd", "PlayerDmgReduceScale": "pvpres",
        "CureAddPercent": "cureadd", "BeCureAddPercent": "becureadd", "FinalCureScale": "finalcure",
-       "DodgePercent": "dodge"}
+       "DodgePercent": "dodge", "BlindingPercent": "blind",
+       # Damage() applies these three on a stage of their own
+       "StatusDmgAddPer": "sadd", "StatusDmgReducePer": "sred", "StatusDmgVulnerablePer": "svuln",
+       # defence ignore, the two final scales and the missing-HP bonus; none of the captured sheets
+       # carries any of them today, but a later capture might
+       "StatusIgnoreDefence": "defignore", "FinalDamageScale": "finaldmg",
+       "FinalCharacterDamageScale": "finalchar", "SkillDmgAddPerByTargetHp": "dmgbytargethp",
+       "SkillTargetReduceHpPer": "exstep", "SkillDmgUnitAddPer": "exunit", "SkillDmgMaxAddPer": "exmax"}
 FLAT = {"MaxHp": "hp", "Attack": "atk", "Defence": "def", "Speed": "spd", "ElementMaster": "mast",
         "KongFuMaster": "kfm", "ElementResistance": "eres", "KongFuResistance": "kfr", "EffectRate": "erate",
         "EffectDodge": "edodge", "MoveDist": "move",
         # flat "value" forms that join the percent rolls divided by their per-rank base (CalcDamageTypeImpl, CalcCureAdd)
         "CritRatePercentValue": "crv", "CritAvoidPercentValue": "crav", "BlockPercentValue": "bv",
         "BlockAvoidPercentValue": "bav", "CureAdd": "cureaddv", "BeCureAdd": "becureaddv", "CritPower": "critpowerv",
-        "BlockValue": "blockvaluev"}
+        "BlockValue": "blockvaluev", "FixedStatusIgnoreDefence": "defignorev"}
 ELE = ["Wind", "Water", "Fire", "Light", "Dark"]
 BASES = ["BaseElementMaster", "BaseElementResistance", "BaseKongFuMaster", "BaseKongFuResistance",
          "BaseCritRatePercentValue", "BaseCritAvoidPercentValue", "BaseBlockPercentValue",
