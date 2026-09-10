@@ -133,7 +133,7 @@
       if (row) for (var i = 0; i < times; i++) foldProps(e, row, st.rank, st.level, ents[st.creator].s.rank);
     });
     /* FightStatusActionExistComponent (Defensive Assault): a status that holds only while the wearer has a shield */
-    if (u.shield > 0) (u.charms || []).forEach(function (ch) {
+    if (u.shield > 0) (u.charms || []).filter(Boolean).forEach(function (ch) {
       (ch && ch.sk.passive || []).forEach(function (pv) {
         if (pv.kind !== "whileAction" || (pv.actions || []).indexOf("Shield") < 0) return;
         (pv.statuses || []).forEach(function (o) {
@@ -369,9 +369,9 @@
     var s = sheetOf(f);
     s.slevel = f.level || 1;
     function bind(list) {
-      return list.map(function (t) { var sk = SKILL[t.id]; return sk ? { sk: sk, rank: t.rank || 1, level: t.level || 1, id: sk.id, name: sk.name } : null; });
+      return list.map(function (t) { var sk = t && SKILL[t.id]; return sk ? { sk: sk, rank: t.rank || 1, level: t.level || 1, id: sk.id, name: sk.name } : null; });
     }
-    var techs = bind(f.techs || []), charms = bind(f.charms || []);
+    var techs = bind(f.techs || []), charms = bind(f.charms || []).filter(Boolean);
     while (techs.length < 4) techs.push(null);
     while (charms.length < 4) charms.push(null);
     s.skillRanks = techs.concat(charms).filter(Boolean).map(function (t) { return t.rank; });
@@ -1391,19 +1391,32 @@
   var RESULT = null, PLAY = null, TIMERS = [];
   var PICK = null;                 /* tapped leaderboard row (fighter id) or token awaiting a cell */
   var VIEW = null;                 /* the window of the map the board shows */
+  var OVER = {};                   /* fighter id -> {techs, charms}: a loadout the user changed on the card */
 
-  function byId(id) { return ROSTER.filter(function (f) { return f.id === id; })[0] || null; }
+  /* a fighter as the teams use it: the roster entry with the user's loadout laid over it, four slots each */
+  function withOverride(base) {
+    var o = OVER[base.id], f = {};
+    Object.keys(base).forEach(function (k) { f[k] = base[k]; });
+    f.techs = (o ? o.techs : base.techs || []).slice(0, 4);
+    f.charms = (o ? o.charms : base.charms || []).slice(0, 4);
+    while (f.techs.length < 4) f.techs.push(null);
+    while (f.charms.length < 4) f.charms.push(null);
+    f.edited = !!o;
+    return f;
+  }
+  function byId(id) { var base = ROSTER.filter(function (f) { return f.id === id; })[0]; return base ? withOverride(base) : null; }
   function defaultPositions() {
     POS = [];
     for (var i = 0; i < 8; i++) { var z = GRID.start[i < 4 ? 0 : 1][i % 4]; POS.push({ x: z[0], y: z[1] }); }
   }
   function saveState() {
-    try { localStorage.setItem("pw_team", JSON.stringify({ t: TEAM.map(function (t) { return t.map(function (f) { return f ? f.id : null; }); }), p: POS })); } catch (e) {}
+    try { localStorage.setItem("pw_team", JSON.stringify({ t: TEAM.map(function (t) { return t.map(function (f) { return f ? f.id : null; }); }), p: POS, o: OVER })); } catch (e) {}
   }
   function loadState() {
     try {
       var st = JSON.parse(localStorage.getItem("pw_team") || "null");
       if (!st || !st.t || !st.p || st.p.length !== 8) return false;
+      OVER = st.o && typeof st.o === "object" ? st.o : {};
       TEAM = st.t.map(function (ids) { return ids.map(byId); });
       POS = st.p.map(function (p, i) { return inZone(i < 4 ? 0 : 1, p.x, p.y) ? p : { x: GRID.start[i < 4 ? 0 : 1][i % 4][0], y: GRID.start[i < 4 ? 0 : 1][i % 4][1] }; });
       return true;
@@ -1573,19 +1586,131 @@
     var side = i < 4 ? 0 : 1;
     if (!f) return '<div class="tslot" data-i="' + i + '">slot ' + (i % 4 + 1) + ' &mdash; drop a fighter</div>';
     var s = f.sheet;
-    function sk(list) {
-      return list.map(function (t) { var k = SKILL[t.id]; return k ? '<span class="sk" title="' + esc(k.name) + ' · rank ' + t.rank + ' · Lv ' + t.level + '">' + iconOf(k) + '<b>' + t.rank + '</b></span>' : ""; }).join("");
+    /* the eight slots are buttons: tap one to swap the skill, clear it, or set its rank and level */
+    function sk(list, kind) {
+      var out = "";
+      for (var k = 0; k < 4; k++) {
+        var t = list[k], sc = t ? SKILL[t.id] : null;
+        out += sc
+          ? '<button type="button" class="sk" data-i="' + i + '" data-kind="' + kind + '" data-k="' + k + '" title="' + esc(sc.name) + ' · rank ' + t.rank + ' · Lv ' + t.level + ' · tap to change">' + iconOf(sc) + '<b>' + t.rank + '</b></button>'
+          : '<button type="button" class="sk empty" data-i="' + i + '" data-kind="' + kind + '" data-k="' + k + '" title="Empty ' + (kind === "tech" ? "Technique" : "Charm") + ' slot ' + (k + 1) + ' · tap to pick one">+</button>';
+      }
+      return out;
     }
     return '<div class="tcard s' + side + '" data-i="' + i + '" draggable="true">' +
       '<div class="thead"><span class="tname">' + esc(f.name) + '</span>' +
       '<span class="tmeta">' + esc(f.cls) + ' · Lv ' + f.level + ' · ' + esc((C.ranks[f.rank] || {}).name || "") + ' · ' + short(f.rating || 0) + ' CR</span>' +
+      (f.edited ? '<span class="tedit" title="This loadout differs from the captured one">edited</span>' +
+                  '<button type="button" class="trestore" data-i="' + i + '" title="Restore the captured loadout">&#8635;</button>' : '') +
       '<button type="button" class="tremove" data-i="' + i + '" title="Remove">&#10005;</button></div>' +
       '<div class="hpbar small"><div class="hpfill" id="hp' + i + '"></div><div class="shfill" id="sh' + i + '" hidden></div><span class="hptext" id="hpt' + i + '"></span></div>' +
       '<div class="statusrow" id="st' + i + '"></div>' +
       '<div class="tstats"><span>ATK ' + short(s.atk) + '</span><span>DEF ' + short(s.def) + '</span><span>HP ' + short(s.hp) + '</span><span>SPD ' + short(s.spd) + '</span>' +
       '<span>Crit ' + (s.cr * 100).toFixed(1) + '%</span><span>Block ' + (s.blockrate * 100).toFixed(0) + '%</span><span>Move ' + (s.move || GRID.defaultMove) + '</span></div>' +
-      '<div class="tskills"><span class="lab">Techniques</span>' + sk(f.techs) + '</div>' +
-      '<div class="tskills"><span class="lab">Charms</span>' + sk(f.charms) + '</div></div>';
+      '<div class="tskills"><span class="lab">Techniques</span>' + sk(f.techs, "tech") + '</div>' +
+      '<div class="tskills"><span class="lab">Charms</span>' + sk(f.charms, "charm") + '</div></div>';
+  }
+
+  /* ---------- the loadout picker: swap a slot's skill, clear it, or set its rank and level ---------- */
+  var SKP = null;                  /* {i, kind, k}: the slot being edited */
+  var TREE = {};
+  (C.classTree || []).forEach(function (c) { TREE[c.name] = c; });
+  function lineOf(cls) { var out = {}, cur = cls, guard = 0; while (cur && TREE[cur] && guard++ < 10) { out[cur] = true; cur = TREE[cur].pre; } return out; }
+  function listOf(f, kind) { return kind === "tech" ? f.techs : f.charms; }
+  function padEntries(list) { var o = []; for (var k = 0; k < 4; k++) { var t = list[k]; o.push(t ? [t.id, t.rank || 1, t.level || 1] : null); } return JSON.stringify(o); }
+  function setSlot(i, kind, k, entry) {
+    var f = fightersFlat()[i]; if (!f) return;
+    var techs = f.techs.slice(), charms = f.charms.slice(), list = kind === "tech" ? techs : charms;
+    if (entry) list.forEach(function (t, j) { if (t && t.id === entry.id && j !== k) list[j] = null; });   /* one copy of a skill per fighter */
+    list[k] = entry;
+    var base = ROSTER.filter(function (x) { return x.id === f.id; })[0];
+    if (base && padEntries(techs) === padEntries(base.techs || []) && padEntries(charms) === padEntries(base.charms || [])) delete OVER[f.id];
+    else OVER[f.id] = { techs: techs, charms: charms };
+    TEAM[i < 4 ? 0 : 1][i % 4] = byId(f.id);
+    saveState(); invalidate();
+  }
+  function restoreLoadout(i) {
+    var f = fightersFlat()[i]; if (!f) return;
+    delete OVER[f.id];
+    TEAM[i < 4 ? 0 : 1][i % 4] = byId(f.id);
+    saveState(); invalidate();
+  }
+  function skTitle() {
+    var f = fightersFlat()[SKP.i], cur = listOf(f, SKP.kind)[SKP.k], sc = cur ? SKILL[cur.id] : null;
+    $("sktitle").textContent = f.name + " · " + (SKP.kind === "tech" ? "Technique" : "Charm") + " slot " + (SKP.k + 1) +
+      (sc ? " · now " + sc.name + " (rank " + cur.rank + ", Lv " + cur.level + ")" : " · empty");
+  }
+  function openSkPick(i, kind, k) {
+    var f = fightersFlat()[i]; if (!f) return;
+    SKP = { i: i, kind: kind, k: k };
+    var cur = listOf(f, kind)[k], others = listOf(f, kind).filter(Boolean);
+    var rank = cur ? cur.rank : (others.length ? others[0].rank : 1), level = cur ? cur.level : (others.length ? others[0].level : 1);
+    var rl = C.rankLabels || {}, keys = Object.keys(rl).map(Number).sort(function (a, b) { return a - b; });
+    if (!keys.length) keys = [rank];
+    $("skrank").innerHTML = keys.map(function (r) { return '<option value="' + r + '">' + r + (rl[String(r)] ? ' · ' + esc(rl[String(r)]) : '') + '</option>'; }).join("");
+    $("skrank").value = String(rank); $("sklevel").value = level;
+    var line = Object.keys(lineOf(f.cls)).sort(function (a, b) { return TREE[b].tier - TREE[a].tier; });
+    $("skclass").innerHTML = '<option value="">' + esc(f.cls) + ' line</option>' +
+      line.map(function (c) { return '<option value="' + esc(c) + '">' + esc(c) + ' (T' + TREE[c].tier + ')</option>'; }).join("") +
+      '<option value="*">Any class</option>';
+    $("skfind").value = "";
+    $("skele").hidden = kind !== "tech"; $("skele").value = "";
+    $("skfind").placeholder = "Search " + (kind === "tech" ? "Techniques" : "Charms") + "\u2026";
+    skTitle(); fillSkList();
+    $("skpick").showModal(); $("skfind").focus();
+  }
+  function fillSkList() {
+    if (!SKP) return;
+    var f = fightersFlat()[SKP.i]; if (!f) return;
+    var want = SKP.kind === "tech" ? "Technique" : "Charm";
+    var q = ($("skfind").value || "").toLowerCase(), wantCls = $("skclass").value, wantEle = $("skele").value;
+    var line = lineOf(f.cls), have = {};
+    listOf(f, SKP.kind).forEach(function (t, k) { if (t && k !== SKP.k) have[t.id] = k + 1; });
+    var pool = DATA.skills.filter(function (s) {
+      if (s.kind !== want) return false;
+      if (wantCls === "*") { /* any class */ } else if (wantCls) { if (s.cls !== wantCls) return false; } else if (!line[s.cls]) return false;
+      if (wantEle && want === "Technique" && s.ele !== wantEle) return false;
+      return !q || s.name.toLowerCase().indexOf(q) >= 0 || s.cls.toLowerCase().indexOf(q) >= 0;
+    }).sort(function (a, b) { return ((TREE[b.cls] || {}).tier || 0) - ((TREE[a.cls] || {}).tier || 0) || a.id - b.id; });
+    $("skcount").textContent = pool.length + " " + want + (pool.length === 1 ? "" : "s");
+    $("sklist").innerHTML = pool.slice(0, 250).map(function (s) {
+      var cdrow = s.r && s.r["22"] ? s.r["22"].CD : 0;
+      var hits = s.ec && s.ec.hits ? s.ec.hits.length : (s.hits || 1);
+      var on = have[s.id];
+      return '<button type="button" class="pick' + (on ? " equipped" : "") + '" data-id="' + s.id + '">' +
+        '<img src="../assets/skills/skill_' + s.id + '.png" alt="" width="34" height="34" loading="lazy">' +
+        '<span class="pn">' + esc(s.name) + '</span>' +
+        '<span class="pm">' + esc(s.cls) + ' \u00b7 T' + s.tier +
+        (s.kind === "Technique"
+          ? ' \u00b7 ' + esc(s.ele) + (hits > 1 ? ' \u00b7 ' + hits + ' hits' : '') + (cdrow ? ' \u00b7 CD ' + cdrow : ' \u00b7 no CD') + (s.startCast === "ai" ? ' \u00b7 casts before battle' : '')
+          : ' \u00b7 Charm' + (s.unmodelled && !s.passive ? ' \u00b7 <b>effect not in the sim yet</b>' : '')) +
+        (on ? ' \u00b7 <b>in slot ' + on + ' \u2014 picking moves it here</b>' : '') + '</span></button>';
+    }).join("") || '<div class="pickempty">Nothing matches.</div>';
+  }
+  function skPickEvents() {
+    $("skfind").addEventListener("input", fillSkList);
+    $("skclass").addEventListener("change", fillSkList);
+    $("skele").addEventListener("change", fillSkList);
+    function rankLevel() {
+      if (!SKP) return;
+      var f = fightersFlat()[SKP.i], cur = f && listOf(f, SKP.kind)[SKP.k];
+      if (!cur) return;
+      var rank = parseInt($("skrank").value, 10) || cur.rank, level = Math.max(1, parseInt($("sklevel").value, 10) || cur.level);
+      setSlot(SKP.i, SKP.kind, SKP.k, { id: cur.id, rank: rank, level: level });
+      skTitle(); fillSkList();
+    }
+    $("skrank").addEventListener("change", rankLevel);
+    $("sklevel").addEventListener("change", rankLevel);
+    $("sklist").addEventListener("click", function (ev) {
+      var b = ev.target.closest ? ev.target.closest(".pick") : null;
+      if (!b || !SKP) return;
+      var id = parseInt(b.getAttribute("data-id"), 10);
+      if (!SKILL[id]) return;
+      setSlot(SKP.i, SKP.kind, SKP.k, { id: id, rank: parseInt($("skrank").value, 10) || 1, level: Math.max(1, parseInt($("sklevel").value, 10) || 1) });
+      $("skpick").close();
+    });
+    $("skclear").addEventListener("click", function () { if (SKP) setSlot(SKP.i, SKP.kind, SKP.k, null); $("skpick").close(); });
+    $("skclose").addEventListener("click", function () { $("skpick").close(); });
   }
   function drawCards() {
     [0, 1].forEach(function (side) {
@@ -1640,6 +1765,10 @@
       if (playing()) return;
       var rm = ev.target.closest ? ev.target.closest(".tremove") : null;
       if (rm) { unassign(+rm.getAttribute("data-i")); return; }
+      var sb = ev.target.closest ? ev.target.closest(".tskills .sk") : null;
+      if (sb) { openSkPick(+sb.getAttribute("data-i"), sb.getAttribute("data-kind"), +sb.getAttribute("data-k")); return; }
+      var rs = ev.target.closest ? ev.target.closest(".trestore") : null;
+      if (rs) { restoreLoadout(+rs.getAttribute("data-i")); return; }
       var r = ev.target.closest ? ev.target.closest("#lb .row") : null;
       if (r) { var id = parseInt(r.getAttribute("data-id"), 10); PICK = (PICK && PICK.id === id) ? null : { id: id }; paintPick(); return; }
       var s = ev.target.closest ? ev.target.closest(".tslot, .tcard") : null;
@@ -1647,7 +1776,7 @@
     });
     $("lbfind").addEventListener("input", drawLb);
     $("fill").addEventListener("click", function () {
-      var have = ROSTER.slice(0, 8);
+      var have = ROSTER.slice(0, 8).map(function (f) { return byId(f.id); });
       TEAM = [[null, null, null, null], [null, null, null, null]];
       have.forEach(function (f, k) { TEAM[k < 4 ? 0 : 1][k % 4] = f; });
       defaultPositions(); PICK = null; saveState(); invalidate();
@@ -1682,7 +1811,7 @@
     if (!ready() || !DATA) return;
     var F = fightersFlat(), P = POS.map(function (p) { return { x: p.x, y: p.y }; });
     var maxRounds = Math.max(0, parseInt($("maxrounds").value, 10) || 0);
-    var sheets = F.map(function (f) { var s = sheetOf(f); s.slevel = f.level; s.skillRanks = f.techs.concat(f.charms).map(function (t) { return t.rank; }); return s; });
+    var sheets = F.map(function (f) { var s = sheetOf(f); s.slevel = f.level; s.skillRanks = f.techs.concat(f.charms).filter(Boolean).map(function (t) { return t.rank; }); return s; });
     var gov = pvpGovernor(sheets);
     var N = 1000, wins = [0, 0, 0], turnsSum = 0, survive = F.map(function () { return 0; });
     var rng = mulberry(12345);
@@ -1855,7 +1984,8 @@
     $("tlrange").addEventListener("input", function () { if (!PLAY) return; stopPlayback(); seekTo(parseInt(this.value, 10)); });
     $("tltrack").addEventListener("click", function (ev) { var s = ev.target.closest ? ev.target.closest(".seg") : null; if (s && PLAY) { stopPlayback(); seekTo(+s.getAttribute("data-k"), true); } });
     $("combatlog").addEventListener("click", function (ev) { var li = ev.target.closest ? ev.target.closest("li[data-k]") : null; if (li && PLAY) { stopPlayback(); seekTo(+li.getAttribute("data-k"), true); } });
-    $("reset").addEventListener("click", function () { try { localStorage.removeItem("pw_team"); } catch (e) {} TEAM = [[null, null, null, null], [null, null, null, null]]; defaultPositions(); PICK = null; invalidate(); });
+    $("reset").addEventListener("click", function () { try { localStorage.removeItem("pw_team"); } catch (e) {} OVER = {}; TEAM = [[null, null, null, null], [null, null, null, null]]; defaultPositions(); PICK = null; invalidate(); });
+    skPickEvents();
     $("swap").addEventListener("click", function () {
       TEAM = [TEAM[1], TEAM[0]];
       var p = POS.slice(4).concat(POS.slice(0, 4));

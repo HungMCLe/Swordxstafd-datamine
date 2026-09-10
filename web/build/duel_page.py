@@ -36,6 +36,30 @@ FIELDS = [
 ]
 
 
+def class_data(out: Path, dist: Path):
+    """The skills dataset with its rank labels, the class portraits on disk, and the class line
+    (each class with its tier and the class it promotes from), for the loadout pickers."""
+    sk = json.loads((out / "_skills.json").read_text(encoding="utf-8"))
+    avail = {p.stem for p in (dist / "assets" / "skills").glob("class_*.png")}
+    class_icon, class_tree = {}, []
+    for t in sk["tiers"]:
+        for c in t["classes"]:
+            base = Path((c.get("icon") or "").strip()).name
+            class_icon[c["name"]] = base if base and f"class_{base}" in avail else None
+            pre = (c.get("prePro") or "").strip()
+            class_tree.append({"name": c["name"], "tier": t["tier"],
+                               "pre": pre if pre and pre != "None" else None,
+                               "icon": class_icon[c["name"]]})
+    # prePro holds the internal id; map it to the display name the tree uses
+    id2name = {}
+    for t in sk["tiers"]:
+        for c in t["classes"]:
+            id2name[c["id"]] = c["name"]
+    for c in class_tree:
+        c["pre"] = id2name.get(c["pre"], c["pre"]) if c["pre"] else None
+    return sk, class_icon, class_tree
+
+
 def render(layout, base_tables, dist: Path, out: Path):
     import build as _b
     ladder, _B, _BA, _BC, sr, grp, name = base_tables()
@@ -74,24 +98,7 @@ def render(layout, base_tables, dist: Path, out: Path):
         json.dumps(duel, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
     # rank labels ("Divine +6") and class portraits, for the scene
-    sk = json.loads((out / "_skills.json").read_text(encoding="utf-8"))
-    avail = {p.stem for p in (dist / "assets" / "skills").glob("class_*.png")}
-    class_icon, class_tree = {}, []
-    for t in sk["tiers"]:
-        for c in t["classes"]:
-            base = Path((c.get("icon") or "").strip()).name
-            class_icon[c["name"]] = base if base and f"class_{base}" in avail else None
-            pre = (c.get("prePro") or "").strip()
-            class_tree.append({"name": c["name"], "tier": t["tier"],
-                               "pre": pre if pre and pre != "None" else None,
-                               "icon": class_icon[c["name"]]})
-    # prePro holds the internal id; map it to the display name the tree uses
-    id2name = {}
-    for t in sk["tiers"]:
-        for c in t["classes"]:
-            id2name[c["id"]] = c["name"]
-    for c in class_tree:
-        c["pre"] = id2name.get(c["pre"], c["pre"]) if c["pre"] else None
+    sk, class_icon, class_tree = class_data(out, dist)
 
     # the PvP governor (PVPSkillPropsScaleOnBattleProcessor): its three inputs
     asr = {int(r[0]): int(r[1]) for r in _b.csvrows("avg_skill_rank")[2:]
