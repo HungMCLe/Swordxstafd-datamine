@@ -70,7 +70,9 @@
   };
   var PROP2FLAT = { FixedStatusDmgAdd: "fadd", FixedDmgAdd: "fadd", DmgAdd: "fadd",
                     FixedStatusDmgReduce: "fred", FixedDmgReduce: "fred", DmgReduce: "fred",
-                    FixedDmgVulnerable: "fvuln", FixedstatusDmgVulnerable: "fvuln" };
+                    FixedDmgVulnerable: "fvuln", FixedstatusDmgVulnerable: "fvuln",
+                    /* the flat damage forms, which join the additive term only on a crit or a block */
+                    CritPower: "critpowerv", BlockValue: "blockvaluev" };
   var PCT_FIELDS = ["cr", "cd", "critres", "boost", "dmgres", "blockrate", "blockeff", "blockavoid", "pvpadd", "pvpres", "cureadd", "becureadd", "finalcure", "dodge", "blind", "vuln", "sadd", "sred", "svuln"];
 
   /* fold one prop row (a status's numbers) into a working sheet, in percent units */
@@ -178,9 +180,18 @@
     }
     function one(coef, withFlat, on, ignoreShield, at) {
       var base = (att.atk * coef / psdr + (withFlat ? flat : 0)) * defTerm;
-      var add = ((att.fadd || 0) + (def.fvuln || 0) - (def.fred || 0)) * coef / psdr;
-      add = Math.max(-0.9 * base, add);
-      out.hits.push({ d: (base + add) / prosdr * (eNum / eDen) * pct * pvp, on: on || [], ignoreShield: !!ignoreShield, at: at || 0 });
+      var flatSum = (att.fadd || 0) + (def.fvuln || 0) - (def.fred || 0);
+      /* Damage() num3: the flat adds, times the skill coefficient, over the target's PvP skill scaler, floored
+         at minus FixedDmgLimitPercent of the base; the attacker's flat Crit Power joins it on a crit and the
+         target's flat Block Value leaves it on a block, so those two cases carry their own figure */
+      function done(extra) {
+        var add = Math.max(-0.9 * base, (flatSum + extra) * coef / psdr);
+        return (base + add) / prosdr * (eNum / eDen) * pct * pvp;
+      }
+      var hit = { d: done(0), on: on || [], ignoreShield: !!ignoreShield, at: at || 0 };
+      if (att.critpowerv) hit.dc = done(att.critpowerv);
+      if (def.blockvaluev) hit.db = done(-def.blockvaluev);
+      out.hits.push(hit);
     }
     if (ec && ec.hits && ec.hits.length) {
       /* HitDamageType.None: the hit lands (statuses, child skills, forced moves) but CalcDamageType computes nothing
@@ -780,7 +791,14 @@
       var isAttack = !pick.ec || !pick.ec.skillType || pick.ec.skillType === "Attack";
       parts.hits.forEach(function (h, hi) {
         if (!foe.alive || !(h.d > 0)) return;
-        var d = h.d * gov, crit = false, block = false, absorbed = 0, blinded = false, dodged = false;
+        /* CalcDamageTypeImpl rolls each of these: the attacker's Blind chance, the target's Dodge, then block,
+           and crit only when the hit was not blocked. Damage() returns 0 for a blind or a dodge. */
+        var blinded = blindPct > 0 && rng() < blindPct;
+        var dodged = !blinded && dodgePct > 0 && rng() < dodgePct;
+        var block = rng() < b;
+        var crit = !block && rng() < p;
+        var d = (crit && h.dc !== undefined ? h.dc : block && h.db !== undefined ? h.db : h.d) * gov;
+        var absorbed = 0;
         var fo = null;
         h.on.forEach(function (o) { var mt = DATA.statuses[String(o.status)]; if (mt && mt.falloff) fo = mt.falloff; });
         if (fo) {
@@ -790,10 +808,9 @@
           d *= Math.pow(1 - fo.pct, steps);
           fallCount++;
         }
-        if (blindPct > 0 && rng() < blindPct) { d = 0; blinded = true; }
-        else if (dodgePct > 0 && rng() < dodgePct) { d = 0; dodged = true; }
-        else if (rng() < b) { d /= bd; block = true; }
-        else if (rng() < p) { d *= m; crit = true; }
+        if (blinded || dodged) d = 0;
+        else if (block) d /= bd;
+        else if (crit) d *= m;
         if (foe.shield > 0 && !h.ignoreShield && d > 0) {
           absorbed = Math.min(foe.shield, d); foe.shield -= absorbed; d -= absorbed;
           if (foe.shield <= 0) foe.st.filter(function (x) { return x.meta.shield; }).forEach(function (x) { removeStatus(foe, x); });
