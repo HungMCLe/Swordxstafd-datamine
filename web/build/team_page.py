@@ -116,6 +116,34 @@ this page also stops any hook chain at depth four as a guard of its own. Also ru
 Misfortune, Shadow Erosion, Curse Resonance and Pursuit of Victory, Resurrection, Reflective Armor, Repelling Wind,
 Gale Shield, Ripple Impact, Blade of Lament, Soul Splash, Defensive Assault, Eye for an Eye, and the HP-unit
 Charms whose stacks come off again as HP climbs back.</p>
+<p><b>Summoned creatures.</b> Waterling Summon, Frenzy Totem and Stonechief Summon are summoning hits
+(<code>FightHitSummon</code> with a <code>SummonId</code>): the creature appears on the cell the hit names relative
+to the caster, or the nearest free one, and acts at once (<code>SummonImmediateRound</code>). Its stats are the
+client's <code>CalcSummonMonsterInheritProp</code>: a fixed part from <code>summon_monster_fix_prop</code> on the
+skill's level curve at the skill's rank (the Waterling's 76% max-HP factor, for instance), plus a share of the
+caster's own props from <code>summon_monster_add_prop</code> times <code>summon_rank_additive_factor</code> at the
+skill's rank (the Waterling inherits 19% of the caster's max HP, 25% attack, 50% defence, 80% speed and all of
+the secondary stats; the Totem 16% / 0 / 50% / 105%; the Stonechief 18% / 70% / 80% / 70%). "Summons cannot
+receive any stat boosts", so the caster's unbuffed sheet is the source. The creature takes its own turns on the
+SPD clock, blocks its cell, is removed when killed (<code>DestroyOnDie</code>) and fades after five of its own
+turns (its lifespan status ends the entity), never decides the result and never counts toward the round cap. Its
+skills and passives are <code>monster_group</code>'s, run by the same rules as a fighter's: the Waterling's
+Dewdrop and Misty Vapor heal 6.5% and 4.8% of its max HP (PvP-scaled to a third) and dispel one debuff; the
+Totem's Inspiration moves a random ally's next turn 20% closer (<code>FightStatusRoundIntervalComponent</code>)
+and its Fighting Spirit is an aura that gives every ally within four cells an attack buff
+(<code>FightStatusMoveRangeComponent</code>). <i>Stealth</i> follows the game's own words: a stealthed unit is
+never the main target of an attack or a heal while a visible one can be, but it still sits under areas. A
+summon's opening cooldowns follow the fighters' rule (this page's assumption) and its skill choice the same AI
+lists, which for these skills carry no list of their own.</p>
+<p><b>Chained hits.</b> Lightning Chain is one strike plus eight links (<code>FightHitChainedComponent</code>,
+its <code>NextHitList</code>): each link picks a random enemy within the skill's own reach of the last victim,
+never one already struck and never straight back, and stops when nobody is in reach.</p>
+<p><b>Fantomon.</b> Battlefield 910 does spawn each fighter's engaged Fantomon (its root carries
+<code>FightRolePetSpawnerComponent</code>). The follower form rides its master's cell, is untargetable
+(<code>SafeAttacker</code>), takes no turn (<code>FollowMaster</code>) and fires its support skill when the master
+starts an Attack Technique (<code>FightAIFollowMasterComponent</code>), scaled by the pet's own attack; but the
+follower's props are set by the server and nowhere in the client (<code>pet_battle</code> is dead config), so
+pets are not run here until a recorded fight shows their numbers.</p>
 <p><b>Burning cells.</b> Meteoric Flames is a summoning hit: it deals its Fire damage to the 3&times;3 and every
 cell of it rolls 60% to spawn grid item 3320 with a Fire status whose <code>MoveNear</code> hook fires the Burn
 skill at an enemy standing there when the cell appears (<code>TryAtStart</code>), at one arriving on it
@@ -145,9 +173,8 @@ to break ties. Its skill's own priorities still come first, so it will step side
 cooldown opens the fight on it unless it is a Zero
 Initial CD skill. Control comes from the client's <code>state_mutex</code> table: Stun, Frozen and Phoenix Stasis
 discard both move and skill, Restrict and Immobilize discard the move only.</p>
-<p><b>Not modelled.</b> Creature summons (Waterling Summon, Frenzy Totem, Stonechief Summon): the cast is logged
-but no creature appears. Fantomon ride along off the clock and are untargetable in the real fight; their triggered
-skills are not run here. Chained hits (Lightning Chain) are treated as one pick. The end-of-fight rule at the
+<p><b>Not modelled.</b> Fantomon (above). Decoy Clone and Blast Spirit (a voodoo doll and a smart grid item,
+equipped by nobody in the top 100). The end-of-fight rule at the
 100-round cap is server-side and unknown, so a capped fight is scored by remaining HP. The AI's scoring loop is
 server-side: the criteria and each skill's ordering are the client's, their default ordering and the global
 weights in <code>BattleAISetting</code> (preferred distance to teammates, bunching penalty) are not modelled.
@@ -214,7 +241,9 @@ def render(layout, base_tables, dist: Path, out: Path):
     cfg = json.dumps({"ranks": ranks, "minCrit": 1.3, "minBlock": 1.5, "pvp": pvpgov, "speedScale": spd_scale,
                       "v": _b.asset_v(), "grid": grid, "fightersUrl": fighters_url,
                       # the class line and the skill-rank labels, for the loadout picker on each team card
-                      "classTree": class_tree, "rankLabels": sk_data["rankLabels"], "rankQuality": sk_data["rankQuality"]},
+                      "classTree": class_tree, "rankLabels": sk_data["rankLabels"], "rankQuality": sk_data["rankQuality"],
+                      # PropType -> sheet field, so a summoned creature's inherited sheet can be built from its caster's
+                      "propFields": dict(list(team_data.PCT.items()) + list(team_data.FLAT.items()))},
                      ensure_ascii=False).replace("</", "<\\/")
 
     def team(side, label):
