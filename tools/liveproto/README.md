@@ -67,3 +67,17 @@ Seen while browsing the Arena for two minutes:
 
 Known gap: the reply to `LegionInfoRequest` arrives with opcode 12714, which is not in this build's
 `SerializeType` table, so it is left as a generic value (it holds a `LegionDisplayInfo` list).
+
+## Fights: the server's record of a battle
+
+The client never simulates a fight; the fight server streams every step (casts, per-hit damage with the
+crit/block/dodge flags, statuses, turn-queue times, positions, cooldowns) over this same connection, and the
+result message names the winner and why the fight ended. `fights.py` turns a capture that contains a fight into
+a normalized record under `out\fights\` and prints it:
+
+    python tools\liveproto\fights.py extract out\liveproto\capN\decoded.json -o out\fights
+    python tools\liveproto\fights.py show out\fights\<gameId>.json
+    python tools\liveproto\fights.py fighters out\fights\<gameId>.json -o out\fights\<gameId>.fighters.json
+
+Capture while playing or watching a fight to its end (no fast-forward). See `docs/GROUND_TRUTH.md` for what the
+stream carries and how it is checked against the simulators.

@@ -170,3 +170,11 @@ more damage than expected, and whether the damage pipeline is really the client'
 - Added client rules that were missing: crit/block value terms and the attacker's block avoid in the divisor; the full `Cure()`; the governor gate per prop group (heals and shields never scaled); `HitTargetType` None/All; `SkillTargetType` checks; facing and flip rules; `SourceMoveList` leaps and damage `MoveCfg` pulls; random-target picks grouped per HitCfg; child skills on every covered unit; fourteen Charm component types.
 - Found and fixed in the final pass: hits typed `None` were dealing damage (Wind's Delight counted twice, 2.8M in one cast); falloff was counted per cast instead of per target and never reached child hits; when-hit Charms ignored their Block/Crit/Damage flags (Rebound struck back on every hit, killing its attacker in one cast); Meteoric Flames covered one cell instead of its 3×3 and spawned no Burn cells; round-start events were dropped from the log when the unit then cast.
 - The `_duel.json` dataset is rebuilt by `web/build/skills_data.py`; `site.py` only renders pages from it.
+
+## Ground truth
+
+Every row marked A or O above is a server decision the client does not contain. The client turns out to be a
+pure playback device: the fight server streams each cast, each hit's damage with its crit/block/dodge flags,
+each status, the turn queue's times, positions and cooldowns, and the result names the winner and the end rule.
+`tools/liveproto/fights.py` records such a stream from a passive capture; `docs/GROUND_TRUTH.md` explains the
+capture and the step-by-step comparison that will turn those rows into V or into documented server rules.
