@@ -447,7 +447,7 @@
     function alive(side) { return ents.filter(function (u) { return u.alive && (side === undefined || u.side === side); }); }
     function enemiesOf(u) { return alive(1 - u.side); }
     function alliesOf(u) { return alive(u.side); }
-    function unitAt() { var m = {}; ents.forEach(function (u) { m[u.pos.x + "," + u.pos.y] = u; }); return m; }
+    function unitAt() { var m = {}; ents.forEach(function (u) { if (u.gone) return; m[u.pos.x + "," + u.pos.y] = u; }); return m; }
     function standable(x, y, occ, mover) { if (!inGrid(x, y)) return false; var u = occ[x + "," + y]; return !u || u === mover; }
     function nearestStandable(cx, cy, occ, mover) {
       for (var i = 0; i < RINGS.length; i++) { var x = cx + RINGS[i][0], y = cy + RINGS[i][1]; if (standable(x, y, occ, mover)) return { x: x, y: y }; }
@@ -481,8 +481,26 @@
         st = { id: sid, meta: meta, dur: meta.dur, creator: creator.i, rank: rank, level: level, stacks: 1, props: lent || null, skills: meta.skillCount || 0 };
         tgt.st.push(st);
       }
+      var ri = meta.roundInterval;
+      if (ri && (ri.rate === undefined || rng() < ri.rate)) {
+        /* FightStatusRoundIntervalComponent: the holder's next turn moves by RoundIntervalPercent of its interval,
+           earlier when FastForward ("Advances Action Bar by 20%") */
+        var step = (ri.pct || 0) * interval(eff(tgt, ents));
+        tgt.t += ri.fastForward ? -step : step;
+        if (events) events.push({ kind: "bar", who: tgt.i, pct: ri.fastForward ? -(ri.pct || 0) : (ri.pct || 0) });
+      }
       if (!quiet) onStatusApplied(creator, tgt, st);
       return st;
+    }
+    /* FightDamageComponentInfo.DisperseStatus: strip Count statuses of the listed types that allow it (CanDispersed) */
+    function disperseStatuses(u, ds) {
+      var cand = u.st.filter(function (x) { return x.meta.canDisperse && (ds.types || []).indexOf(x.meta.type) >= 0; });
+      for (var n = 0; n < (ds.count || 1) && cand.length; n++) {
+        var k = ds.random ? Math.floor(rng() * cand.length) : 0;
+        var st = cand.splice(k, 1)[0];
+        removeStatus(u, st);
+        if (events) events.push({ kind: "status", who: u.i, name: statusName(st.meta, st.props) + " dispelled" });
+      }
     }
     function removeStatus(holder, st) {
       var i = holder.st.indexOf(st);
@@ -490,10 +508,12 @@
       if (st.meta.shield && !holder.st.some(function (x) { return x.meta.shield; })) { holder.shield = 0; onShieldGone(holder); }
     }
     function hasShield(u) { return u.shield > 0 && u.st.some(function (x) { return x.meta.shield; }); }
+    function stealthed(u) { return u.st.some(function (x) { return x.meta.invisible; }); }
     function kill(u, by) {
       if (u.hp > 0 || !u.alive) return;
       var overflow = -u.hp;
       u.alive = false; u.hp = 0; u.st = []; u.shield = 0;
+      if (u.summon && u.destroyOnDie) u.gone = true;                    /* FightRoleCharacterComponent.DestroyOnDie: the cell frees */
       gridFx = gridFx.filter(function (f) { return !(f.creator === u.i && f.meta.removeAtRoundTargetDie); });   /* StatusAutoRemove: RemoveAtRoundTargetDie */
       if (events) events.push({ kind: "down", who: u.i });
       if (by) onKill(by, u, overflow);
@@ -742,6 +762,7 @@
       });
       /* grid items: arriving on one from another cell sets it off (TryAtEnterRange) */
       fxAt(mover.pos.x, mover.pos.y).forEach(function (f) { if (f.meta.moveNear.onEnter && !(from.x === f.x && from.y === f.y)) fireGrid(f, mover); });
+      auraSettle();
     }
     /* forced moves: the caster's SourceMoveList and the victim's damage MoveCfg (FightSKillMoveCfg) */
     function forceMove(mover, cfg, caster, aim, dir, flip, who) {
@@ -888,6 +909,11 @@
       });
       /* grid items count on their creator's rounds (RoundTarget Creator, RoundUpdateTiming End) */
       gridFx = gridFx.filter(function (f) { if (f.creator !== u.i) return true; if (f.dur > 0) f.dur--; return f.dur !== 0; });
+      /* a summon's lifespan status (StatusEndComponent.RemoveApplyEntity) counts its own turn ends */
+      if (u.summon && u.alive && u.life > 0) {
+        u.life--;
+        if (u.life === 0) { u.alive = false; u.hp = 0; u.st = []; u.shield = 0; u.gone = true; if (events) events.push({ kind: "expire", who: u.i }); }
+      }
     }
     /* statuses that last N of the holder's skill casts (DurationSkillCount) */
     function spendSkillStatuses(u, isAttack) {
@@ -948,13 +974,31 @@
       var ec = sk.ec || {};
       var selfish = isAlly(sk);
       var pool = poolFor(me, sk);
+      var kind = ec.targetKind || "Pos";
+      if (ec.target === "None") {
+        /* HitTargetType.None (summons): no unit is aimed at; every reachable aim offset is a plan, and the area,
+           the facing and the summon cell still follow the aim */
+        var outN = [];
+        var g0 = geo(sk);
+        g0.entries.forEach(function (e) {
+          if (e.flipDep && e.flip !== !!me.flip) return;
+          var ax = pos.x + e.r[0], ay = pos.y + e.r[1];
+          if (!inGrid(ax, ay)) return;
+          if ((kind === "PosCanStand" || kind === "PosSkillDirectionCanStand") && !standable(ax, ay, occ, me)) return;
+          outN.push({ aim: { x: ax, y: ay }, dir: e.dir, flip: e.flip, entry: e, perHit: e.perHit.map(function () { return []; }), union: [], onUnit: false, primary: null });
+        });
+        return outN;
+      }
       if (!pool.length) return [];
+      /* Stealth: "this unit cannot be selected as the main target for attacks or healing" while another unit of
+         the pool can be; it can still sit under an area */
+      var aimPool = pool.filter(function (u) { return !stealthed(u); });
+      if (!aimPool.length) aimPool = pool;
       var g = geo(sk);
       var taunt = me.taunt && !selfish ? me.taunt : null;
       var offs = pool.map(function (u) { return (u.pos.x - pos.x) + "," + (u.pos.y - pos.y); });
       var cand = {};
       offs.forEach(function (k) { (g.byOff[k] || []).forEach(function (ei) { cand[ei] = 1; }); });
-      var kind = ec.targetKind || "Pos";
       var out = [];
       Object.keys(cand).forEach(function (ei) {
         var e = g.entries[ei];
@@ -962,7 +1006,7 @@
         var ax = pos.x + e.r[0], ay = pos.y + e.r[1];
         if (ax < 0 || ay < 0 || ax >= GRID.w || ay >= GRID.h) return;
         var unitHere = occ[ax + "," + ay];
-        if ((kind === "Entity" || kind === "EntityFollow") && !(unitHere && unitHere.alive && pool.indexOf(unitHere) >= 0)) return;
+        if ((kind === "Entity" || kind === "EntityFollow") && !(unitHere && unitHere.alive && aimPool.indexOf(unitHere) >= 0)) return;
         if ((kind === "PosCanStand" || kind === "PosSkillDirectionCanStand") && !standable(ax, ay, occ, me)) return;
         var perHit = [], seen = {}, union = [];
         function take(u) { if (!seen[u.i]) { seen[u.i] = 1; union.push(u); } }
@@ -973,8 +1017,9 @@
           perHit.push(list);
         }
         if (!union.length) return;
+        if (aimPool !== pool && !union.some(function (u) { return aimPool.indexOf(u) >= 0; })) return;
         if (taunt && union.indexOf(taunt) < 0) return;
-        out.push({ aim: { x: ax, y: ay }, dir: e.dir, flip: e.flip, entry: e, perHit: perHit, union: union, onUnit: !!unitHere,
+        out.push({ aim: { x: ax, y: ay }, dir: e.dir, flip: e.flip, entry: e, perHit: perHit, union: union, onUnit: !!(unitHere && aimPool.indexOf(unitHere) >= 0),
                    primary: union.slice().sort(function (x, y) { return x.hp / x.s.hp - y.hp / y.s.hp; })[0] });
       });
       return out;
@@ -1000,8 +1045,8 @@
         var k = chain[i], x = 0;
         if (k === "MoreHitCount") x = pl.union.length;
         else if (k === "ShorterMoveDist" || k === "LeastMoveNearTarget") x = -cell.d;
-        else if (k === "LowerTargetHp") x = -Math.min.apply(null, pl.union.map(function (u) { return u.hp / u.s.hp; }));
-        else if (k === "ShorterTargetDist" || k === "ShorterMovedTargetDist" || k === "ShorterEnemyTargetPosDistAndSameDir") x = -dist(cell, pl.aim);
+        else if (k === "LowerTargetHp") x = pl.union.length ? -Math.min.apply(null, pl.union.map(function (u) { return u.hp / u.s.hp; })) : 0;
+        else if (k === "ShorterTargetDist" || k === "ShorterMovedTargetDist" || k === "ShorterEnemyTargetPosDistAndSameDir") x = pl.union.length ? -dist(cell, pl.aim) : (enemies.length ? -Math.min.apply(null, enemies.map(function (u) { return dist(pl.aim, u.pos); })) : 0);
         else if (k === "SaferPos") x = enemies.length ? Math.min.apply(null, enemies.map(function (u) { return dist(cell, u.pos); })) : 0;
         else if (k === "ApproachRidiculer") x = me.taunt ? -dist(cell, me.taunt.pos) : 0;
         else if (k === "PriorTargetEntityPos") x = pl.onUnit ? 1 : 0;
@@ -1038,14 +1083,15 @@
     function planWithMove(u, sk, reach, occ, last) {
       var chain = chainOf(sk, last, !!u.taunt);
       var pool = poolFor(u, sk);
-      if (!pool.length) return null;
+      var noTarget = (sk.ec || {}).target === "None";          /* summons: no unit to reach, any cell will do */
+      if (!pool.length && !noTarget) return null;
       var fp = geo(sk).byOff;
       var cells = Object.keys(reach).map(function (k) { return reach[k]; });
       var cand = [];
       cells.forEach(function (c) {
         var n = 0;
         for (var i = 0; i < pool.length; i++) { var v = pool[i]; if (v === u || fp[(v.pos.x - c.x) + "," + (v.pos.y - c.y)]) n++; }
-        if (n) cand.push({ c: c, n: n });
+        if (n || noTarget) cand.push({ c: c, n: n });
       });
       if (!cand.length) return null;
       cand.sort(function (x, y) { return (y.n - x.n) || (x.c.d - y.c.d); });
@@ -1082,6 +1128,71 @@
       return best ? walkTo(u, best) : 0;
     }
     function moveBudget(u) { return rooted(u) ? 0 : (u.s.move || GRID.defaultMove); }
+
+    /* ---- summoned creatures (FightHitSummon with a SummonId) ---- */
+    /* BattleFormulaHandler.CalcSummonMonsterInheritProp: fixed props = the level curve x rank multiplier x the
+       summon_monster_fix_prop factor, at the summoning skill's rank and level; inherited props = the caster's prop
+       x summon_monster_add_prop share x summon_rank_additive_factor[rank]. "Summons cannot receive any stat boosts",
+       so the caster's unbuffed sheet is the source */
+    function summonSheet(cs, def, rank, level) {
+      var s = { rank: cs.rank, vuln: 0, fadd: 0, fred: 0, fvuln: 0, aff: {}, aegis: {} };
+      var rf = (def.rankFactor || {})[String(rank)] || {};
+      function inh(prop) { var a = def.add[prop]; if (a === undefined) return 0; var f = rf[prop]; return a * (f === undefined ? 1 : f); }
+      var fields = C.propFields || {};
+      Object.keys(cs).forEach(function (k) { if (typeof cs[k] === "number") s[k] = 0; });
+      Object.keys(fields).forEach(function (p) { var fld = fields[p]; if (typeof cs[fld] === "number") s[fld] = cs[fld] * inh(p); });
+      ELES.forEach(function (e) { s.aff[e] = (cs.aff[e] || 0) * inh(e + "DamageAdd"); s.aegis[e] = (cs.aegis[e] || 0) * inh(e + "DamageReduce"); });
+      var fx = (def.fixRows || {})[String(rank)] || {};
+      Object.keys(fx).forEach(function (k) { var fld = fields[k]; if (fld) s[fld] = (s[fld] || 0) + curveValue(fx[k], rank, level, cs.rank.name); });
+      s.move = def.moveDist || 0;
+      s.hp = Math.max(1, s.hp || 0); s.atk = Math.max(1, s.atk || 0); s.spd = Math.max(1, s.spd || 0);
+      return s;
+    }
+    function spawnSummon(caster, sm, x, y, rank, level, tag) {
+      var def = sm.def; if (!def) return null;
+      var occ = unitAt();
+      var cell = standable(x, y, occ, null) ? { x: x, y: y } : nearestStandable(x, y, occ, null);
+      if (!cell) return null;
+      var s = summonSheet(caster.s, def, rank, level);
+      s.slevel = level;
+      function bindS(list) { return (list || []).map(function (rec) { return { sk: rec, rank: rank, level: level, id: rec.id, name: rec.name }; }); }
+      var techs = bindS(def.skills), charms = bindS(def.passives);
+      while (techs.length < 4) techs.push(null);
+      var u = { i: ents.length, side: caster.side, name: def.name, cls: "Summon", f: { name: def.name, cls: "Summon", sheet: s, techs: [], charms: [] }, s: s,
+                techs: techs, charms: charms, hp: s.hp, shield: 0, st: [], cd: openingCds(techs, charms), uses: techs.map(function () { return 0; }),
+                /* SummonImmediateRound: it acts right after the caster's turn (same time, later in the queue) */
+                t: caster.t, turns: 0, pos: { x: cell.x, y: cell.y }, alive: true, charmFired: {}, techCasts: 0, order: (caster.order || 0) + 0.5,
+                taunt: null, flip: caster.flip, summon: true, owner: caster.i, life: sm.lifespan || 0, blocks: !!def.blocks, gone: false,
+                destroyOnDie: def.destroyOnDie !== false };
+      ents.push(u);
+      (sm.initStatuses || []).forEach(function (sid) { applyStatus(u, sid, caster, rank, level, null, true); });
+      if (events) events.push({ kind: "summon", who: caster.i, unit: u.i, name: def.name, to: [cell.x, cell.y] });
+      auraSettle();
+      return u;
+    }
+    /* an aura (FightStatusMoveRangeComponent, TargetCloseTriggerStatus): units of the target kind inside the holder's
+       range carry its status; checked when something is summoned or moves */
+    function auraSettle() {
+      ents.forEach(function (w) {
+        if (!w.alive) return;
+        eachPassive(w, function (pv, ch) {
+          if (pv.kind !== "aura") return;
+          ents.forEach(function (u) {
+            if (!u.alive || u === w) return;
+            if (pv.target === "FriendNotMe" || pv.target === "Friend") { if (u.side !== w.side) return; }
+            else if (pv.target === "Enemy") { if (u.side === w.side) return; }
+            var inside = (pv.cells || []).some(function (c) { return w.pos.x + c[0] === u.pos.x && w.pos.y + c[1] === u.pos.y; });
+            if (!inside) return;
+            (pv.statuses || []).forEach(function (o) {
+              if (u.st.some(function (x) { return x.id === o.status; })) return;
+              if (rng() >= (o.chance === undefined ? 1 : o.chance)) return;
+              var st = applyStatus(u, o.status, w, ch.rank, ch.level);
+              if (st && events) events.push({ kind: "status", who: u.i, name: statusName(st.meta, st.props), tag: ch.name });
+            });
+          });
+        });
+      });
+    }
 
     /* ---- one cast ---- */
     function cast(t, slot, pl) {
@@ -1160,6 +1271,7 @@
         (hitTargets[hi] = hitTargets[hi] || []).push(foe);      /* a child skill is cast on every unit the hit covers */
         var hc = g.hits[hi];
         if (hc && hc.move && !hc.child && foe.alive && rng() < (hc.move.chance === undefined ? 1 : hc.move.chance)) forceMove(foe, hc.move, me, aim, dir, flip, pick.name);
+        if (hc && hc.disperse && foe.alive && rng() < (hc.disperse.chance === undefined ? 1 : hc.disperse.chance)) disperseStatuses(foe, hc.disperse);
         kill(foe, me);
         return here;
       }
@@ -1225,6 +1337,26 @@
           }
           return;
         }
+        if (h.chained && h.chained.links > 1) {
+          /* FightHitChainedComponent: the first strike lands on the aim; each next link picks a random unit of the
+             pool within the skill's own reach of the last victim, never one already struck (Repeat off) and never
+             straight back (Back off), until the chain runs out or nobody is in reach */
+          var first = (pl.perHit[hi] || []).filter(function (u) { return u.alive; })[0];
+          var visited = {}, prevU = null, cur = first, hopRange = (ec.range && ec.range.length) ? ec.range : [[0, 0]];
+          for (var link = 0; link < h.chained.links && cur; link++) {
+            var pfc = partsFor(cur);
+            applyHit(hi, cur, pfc.parts, pfc.mE, pfc.E, rows, pick.name, pick.gov !== false, t.rank, t.level);
+            targets[cur.i] = 1; visited[cur.i] = 1;
+            var from = cur;
+            var nxt = pool.filter(function (u) {
+              return u.alive && u !== from && (h.chained.repeat || !visited[u.i]) && (h.chained.back || u !== prevU) &&
+                hopRange.some(function (r) { return from.pos.x + r[0] === u.pos.x && from.pos.y + r[1] === u.pos.y; });
+            });
+            prevU = cur; cur = nxt.length ? nxt[Math.floor(rng() * nxt.length)] : null;
+          }
+          occ = unitAt();
+          return;
+        }
         (pl.perHit[hi] || []).forEach(function (foe) {
           if (!foe.alive) return;
           var pf = partsFor(foe);
@@ -1240,8 +1372,16 @@
             var rate = (h.summon.rates || [])[ci]; if (rate === undefined) rate = h.summon.rate === undefined ? 1 : h.summon.rate;
             if (rng() < rate) placeGrid(origin.x + w[0], origin.y + w[1], h.summon.gridStatuses, me, t.rank, t.level, pick.name);
           });
+        } else if (h.summon && h.summon.def) {
+          /* FightHitSummon with a SummonId: the creature appears on each SummonScope cell (nearest free cell if taken) */
+          var sOrigin = h.onSource ? me.pos : aim;
+          (h.cells || []).forEach(function (c, ci) {
+            var w2 = turn(c, dir, flip);
+            var rate2 = (h.summon.rates || [])[ci]; if (rate2 === undefined) rate2 = h.summon.rate === undefined ? 1 : h.summon.rate;
+            if (rng() < rate2) spawnSummon(me, h.summon, sOrigin.x + w2[0], sOrigin.y + w2[1], t.rank, t.level, pick.name);
+          });
         } else if (h.summon && (h.summon.creature || (h.summon.pools && h.summon.pools.length))) {
-          if (events) events.push({ kind: "info", who: me.i, text: "summons a creature — summoned units are not modelled" });
+          if (events) events.push({ kind: "info", who: me.i, text: "summons a creature — this creature's data is not exported" });
         }
         occ = unitAt();
       });
@@ -1284,11 +1424,12 @@
     var winner = -1, order = 0, rounds = 0;
     while (turns < MAXT) {
       var A = alive(0), B = alive(1);
-      if (!A.length || !B.length) { winner = A.length ? 0 : 1; break; }
+      var Ap = A.filter(function (u) { return !u.summon; }), Bp = B.filter(function (u) { return !u.summon; });
+      if (!Ap.length || !Bp.length) { winner = Ap.length ? 0 : 1; break; }   /* summons carry NotCheckFightResult */
       if (maxRounds > 0 && rounds >= maxRounds) { capped = true; break; }
       me = null;
       A.concat(B).forEach(function (u) { if (!me || u.t < me.t - 1e-9 || (Math.abs(u.t - me.t) < 1e-9 && u.order < me.order)) me = u; });
-      turns++; me.turns++; rounds++; me.order = ++order;
+      turns++; me.turns++; if (!me.summon) rounds++; me.order = ++order;       /* the cap counts player activations */
       events = wantLog ? [] : null; var startEv = events;   /* round-start events ride with the first entry of the turn */
       var moved = 0;
       me.taunt = null;
@@ -1367,10 +1508,12 @@
     }
     var hpLeft = ents.map(function (u) { return Math.max(0, u.hp); });
     if (winner < 0) {
-      var ra = alive(0).reduce(function (a, u) { return a + u.hp / u.s.hp; }, 0), rb = alive(1).reduce(function (a, u) { return a + u.hp / u.s.hp; }, 0);
+      var ra = alive(0).filter(function (u) { return !u.summon; }).reduce(function (a, u) { return a + u.hp / u.s.hp; }, 0),
+          rb = alive(1).filter(function (u) { return !u.summon; }).reduce(function (a, u) { return a + u.hp / u.s.hp; }, 0);
       winner = ra === rb ? -1 : (ra > rb ? 0 : 1);
     }
-    return { winner: winner, capped: capped, turns: turns, log: log, hp: hpLeft, alive: ents.map(function (u) { return u.alive; }) };
+    return { winner: winner, capped: capped, turns: turns, log: log, hp: hpLeft, alive: ents.map(function (u) { return u.alive; }),
+             units: ents.map(function (u) { return { name: u.name, side: u.side, cls: u.cls, summon: !!u.summon, owner: u.owner, hpMax: u.s.hp }; }) };
   }
 
   function mulberry(seed) {
@@ -1510,6 +1653,14 @@
       var cell = cellAt(p.x, p.y);
       if (cell) cell.innerHTML = tokenHtml(f, i, cur);
     });
+    /* summoned creatures: extra units beyond the eight fighters, drawn while they are on the field */
+    if (cur && PLAY && PLAY.sample && PLAY.sample.units) for (var si = fightersFlat().length; si < cur.pos.length; si++) {
+      if (!cur.alive[si]) continue;
+      var su = PLAY.sample.units[si]; if (!su) continue;
+      var sc = cellAt(cur.pos[si][0], cur.pos[si][1]);
+      var spct = Math.max(0, Math.min(1, cur.hp[si] / (su.hpMax || 1)));
+      if (sc) sc.innerHTML = '<div class="token summon s' + su.side + '" data-i="' + si + '" title="' + esc(su.name) + ' · summoned by ' + esc(unitName(fightersFlat(), su.owner)) + '"><span class="tname">' + esc(su.name) + '</span><span class="thp"><i style="width:' + (spct * 100).toFixed(1) + '%"></i></span></div>';
+    }
   }
   function moveToken(i, x, y) {
     var side = i < 4 ? 0 : 1;
@@ -1819,7 +1970,7 @@
       var r = oneFight(F, P, rng, false, maxRounds, gov.scale);
       wins[r.winner < 0 ? 2 : r.winner]++;
       turnsSum += r.turns;
-      r.alive.forEach(function (a, k) { if (a) survive[k]++; });
+      r.alive.forEach(function (a, k) { if (a && k < survive.length) survive[k]++; });
     }
     var sample = oneFight(F, P, mulberry(777), true, maxRounds, gov.scale);
     RESULT = { wins: wins, N: N, turns: turnsSum / N, survive: survive, sample: sample, gov: gov };
@@ -1847,21 +1998,29 @@
   function fillTable(sample) {
     var F = fightersFlat();
     $("logbody").innerHTML = sample.log.map(function (l) {
-      var tg = (l.targets || []).map(function (i) { return esc(F[i].name); }).join(", ");
-      return "<tr><td class=num>" + l.t + "</td><td class=num>" + l.turn + "</td><td><span class='dot s" + l.side + "'></span>" + esc(F[l.who].name) + "</td><td>" + esc(l.skill) + (l.moved ? " <span class=hint>(moved " + l.moved + ")</span>" : "") + "</td><td>" + tg + "</td><td>" + l.hits.map(hitText).join(", ") + "</td><td class=num>" + (l.dmg ? short(l.dmg) : "") + "</td></tr>";
+      var tg = (l.targets || []).map(function (i) { return esc(unitName(F, i)); }).join(", ");
+      return "<tr><td class=num>" + l.t + "</td><td class=num>" + l.turn + "</td><td><span class='dot s" + l.side + "'></span>" + esc(unitName(F, l.who)) + "</td><td>" + esc(l.skill) + (l.moved ? " <span class=hint>(moved " + l.moved + ")</span>" : "") + "</td><td>" + tg + "</td><td>" + l.hits.map(hitText).join(", ") + "</td><td class=num>" + (l.dmg ? short(l.dmg) : "") + "</td></tr>";
     }).join("");
   }
 
   /* ---------- the timeline and the scene ---------- */
+  function unitName(F, i) {
+    if (i < F.length && F[i]) return F[i].name;
+    var u = PLAY && PLAY.sample && PLAY.sample.units ? PLAY.sample.units[i] : null;
+    return u ? u.name : "unit " + i;
+  }
   function eventText(F, e) {
+    if (e.kind === "summon") return esc(unitName(F, e.who)) + " summons " + esc(e.name) + " at column " + (e.to[0] + 1) + ", row " + (e.to[1] + 1);
+    if (e.kind === "expire") return esc(unitName(F, e.who)) + " fades away";
+    if (e.kind === "bar") return esc(unitName(F, e.who)) + (e.pct < 0 ? "'s next turn comes " + Math.round(-e.pct * 100) + "% sooner" : "'s next turn comes " + Math.round(e.pct * 100) + "% later");
     if (e.kind === "grid") return esc(e.tag) + " sets column " + (e.x + 1) + ", row " + (e.y + 1) + " on " + esc((e.label || "").toLowerCase());
-    if (e.kind === "info") return esc(F[e.who].name) + " " + esc(e.text);
-    if (e.kind === "dmg") return esc(F[e.who].name) + " takes " + short(e.amount) + " from " + esc(e.tag);
-    if (e.kind === "heal") return esc(F[e.who].name) + " heals " + short(e.amount) + (e.tag ? " (" + esc(e.tag) + ")" : "");
-    if (e.kind === "status") return esc(F[e.who].name) + ": " + esc(e.name) + (e.tag ? " (" + esc(e.tag) + ")" : "");
-    if (e.kind === "save") return esc(F[e.who].name) + " survives at 1 HP (" + esc(e.tag) + ")";
-    if (e.kind === "down") return esc(F[e.who].name) + " is down";
-    if (e.kind === "move") return esc(F[e.who].name) + " moves to column " + (e.to[0] + 1) + ", row " + (e.to[1] + 1);
+    if (e.kind === "info") return esc(unitName(F, e.who)) + " " + esc(e.text);
+    if (e.kind === "dmg") return esc(unitName(F, e.who)) + " takes " + short(e.amount) + " from " + esc(e.tag);
+    if (e.kind === "heal") return esc(unitName(F, e.who)) + " heals " + short(e.amount) + (e.tag ? " (" + esc(e.tag) + ")" : "");
+    if (e.kind === "status") return esc(unitName(F, e.who)) + ": " + esc(e.name) + (e.tag ? " (" + esc(e.tag) + ")" : "");
+    if (e.kind === "save") return esc(unitName(F, e.who)) + " survives at 1 HP (" + esc(e.tag) + ")";
+    if (e.kind === "down") return esc(unitName(F, e.who)) + " is down";
+    if (e.kind === "move") return esc(unitName(F, e.who)) + " moves to column " + (e.to[0] + 1) + ", row " + (e.to[1] + 1);
     return "";
   }
   function buildTimeline(sample) {
@@ -1871,7 +2030,7 @@
     sample.log.forEach(function (l, k) {
       var cls = "seg s" + l.side + (l.turn === 0 ? " pre" : "") + (l.dmg ? " dmg" : "") + (l.turn !== lastTurn && l.sub === 0 ? " newturn" : "");
       lastTurn = l.turn;
-      h += '<span class="' + cls + '" data-k="' + (k + 1) + '" title="' + esc(F[l.who].name + ": " + l.skill) + '"></span>';
+      h += '<span class="' + cls + '" data-k="' + (k + 1) + '" title="' + esc(unitName(F, l.who) + ": " + l.skill) + '"></span>';
     });
     tr.innerHTML = h;
     var r = $("tlrange"); r.max = n; r.value = 0;
@@ -1879,10 +2038,10 @@
   function renderLog(sample) {
     var F = fightersFlat();
     $("combatlog").innerHTML = sample.log.map(function (l, k) {
-      var tg = (l.targets || []).map(function (i) { return esc(F[i].name); }).join(", ");
+      var tg = (l.targets || []).map(function (i) { return esc(unitName(F, i)); }).join(", ");
       var hits = l.hits.map(function (h) { return (h.blinded ? "blind" : h.dodged ? "dodge" : short(h.d)) + (h.crit ? "!" : "") + (h.block ? " blk" : ""); }).join(" ");
       var ev = l.events.map(function (e) { return eventText(F, e); }).filter(Boolean).join("; ");
-      return '<li class="s' + l.side + ' future" data-k="' + (k + 1) + '"><span class="tlk">' + (l.turn === 0 ? "pre" : "t" + l.turn) + '</span> <b>' + esc(F[l.who].name) + "</b> " + esc(l.skill) + (l.moved ? " <span class=hint>(moved " + l.moved + ")</span>" : "") + (tg ? " → " + tg : "") + (hits ? " <span class=hits>" + hits + "</span>" : "") + (l.dmg ? " = " + short(l.dmg) : "") + (ev ? "<br><span class=hint>" + ev + "</span>" : "") + "</li>";
+      return '<li class="s' + l.side + ' future" data-k="' + (k + 1) + '"><span class="tlk">' + (l.turn === 0 ? "pre" : "t" + l.turn) + '</span> <b>' + esc(unitName(F, l.who)) + "</b> " + esc(l.skill) + (l.moved ? " <span class=hint>(moved " + l.moved + ")</span>" : "") + (tg ? " → " + tg : "") + (hits ? " <span class=hits>" + hits + "</span>" : "") + (l.dmg ? " = " + short(l.dmg) : "") + (ev ? "<br><span class=hint>" + ev + "</span>" : "") + "</li>";
     }).join("");
   }
   /* show the fight as it stood after action k (0 = before the first) */
@@ -1904,8 +2063,8 @@
       (l.targets || []).forEach(function (i) { var t = document.querySelector('#board .token[data-i="' + i + '"]'); if (t) t.classList.add("hit"); });
       if (l.moved && prev) { var fc = cellAt(prev.pos[l.who][0], prev.pos[l.who][1]); if (fc) fc.classList.add("from"); }
       if (animate) floats(l, prev);
-      var tg = (l.targets || []).map(function (i) { return F[i].name; }).join(", ");
-      $("tlcaption").textContent = (l.turn === 0 ? "Before battle" : "Turn " + l.turn) + " · " + F[l.who].name + ": " + l.skill + (tg ? " → " + tg : "") + (l.dmg ? " for " + short(l.dmg) : "") + " · " + k + " / " + n;
+      var tg = (l.targets || []).map(function (i) { return unitName(F, i); }).join(", ");
+      $("tlcaption").textContent = (l.turn === 0 ? "Before battle" : "Turn " + l.turn) + " · " + unitName(F, l.who) + ": " + l.skill + (tg ? " → " + tg : "") + (l.dmg ? " for " + short(l.dmg) : "") + " · " + k + " / " + n;
     }
     $("tlrange").value = k;
     document.querySelectorAll("#tltrack .seg").forEach(function (s) { var sk = +s.getAttribute("data-k"); s.classList.toggle("done", sk <= k); s.classList.toggle("now", sk === k); });

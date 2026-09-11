@@ -68,6 +68,16 @@ def _trigger_cfgs(cfgs):
 
 
 # ---------------------------------------------------------------- hits
+def chain_len(hid, depth=0):
+    """FightHitChainedComponentInfo.NextHitList: the chain is a linked list of hit entities; its length is the
+    number of strikes (Lightning Chain: one hit plus eight jumps)."""
+    info = comps(hid).get("FightHitChainedComponent")
+    if not info or depth > 30:
+        return 1
+    nxt = [h.get("ClassId") for h in (info.get("NextHitList") or []) if h and h.get("ClassId")]
+    return 1 + (max(chain_len(n, depth + 1) for n in nxt) if nxt else 0)
+
+
 def walk_hits(hitlist, out, depth=0, t0=0.0):
     """Flatten a skill's hit tree into one entry per landed hit, in order, each
     stamped with the moment it lands (HitCfg.Delay, seconds from the cast)."""
@@ -117,6 +127,12 @@ def walk_hits(hitlist, out, depth=0, t0=0.0):
         on = [{"status": s["StatusId"], "chance": s.get("BasePercent", 1.0),
                "byProp": bool(s.get("AffectedByProp")), "target": s.get("TargetType")}
               for s in (dmg.get("StatusList") or []) if s.get("StatusId")]
+        # FightDamageComponentInfo.DisperseStatus: dispel Count statuses of the listed StatusTypes on the target
+        ds = dmg.get("DisperseStatus") or {}
+        disperse = None
+        if (ds.get("BasePercent") or 0) > 0 and (ds.get("Count") or 0) > 0:
+            disperse = {"chance": ds.get("BasePercent", 1.0), "byProp": bool(ds.get("AffectedByProp")),
+                        "types": ds.get("TargetTypes") or [], "count": ds.get("Count"), "random": bool(ds.get("IsRandom"))}
         scope_cells = [list(c.get("Pos") or [0, 0]) for c in (info.get("Scope") or [])]
         summon = None
         if name == "FightHitSummonComponent":
@@ -128,6 +144,8 @@ def walk_hits(hitlist, out, depth=0, t0=0.0):
             pools = [(pl.get("SummonPoolCfg") or {}).get("SummonId") for pl in ((info.get("SummonPoolSetting") or {}).get("SummonPools") or [])]
             summon = {"gridItem": info.get("SummonGridItemId") or 0, "gridStatuses": [x for x in (info.get("SummonGridItemStatus") or []) if x],
                       "creature": info.get("SummonId") or 0, "pools": [x for x in pools if x],
+                      "statuses": [x for x in (info.get("SummonStatus") or []) if x], "immediate": bool(info.get("SummonImmediateRound")),
+                      "levelType": info.get("LevelType"), "inheritProp": bool(info.get("InheritProp")),
                       "rates": [c.get("Rate", 1.0) for c in sc], "rate": info.get("Rate", 1.0),
                       "lifespan": info.get("LifespanStatusId") or 0}
         out.append({"prop": info.get("DamageProp"), "fixed": info.get("FixedDamageProp"),
@@ -138,9 +156,10 @@ def walk_hits(hitlist, out, depth=0, t0=0.0):
                     # the caster's own cell (HitCfg.ActOnSouce) rather than the skill's aim point
                     "cells": scope_cells, "summon": summon,
                     "onSource": bool(h.get("ActOnSouce")),
-                    "chained": ({"repeat": bool(info.get("Repeat")), "back": bool(info.get("Back")), "preferUnvisited": bool(info.get("PreferUnvisited"))}
+                    "chained": ({"repeat": bool(info.get("Repeat")), "back": bool(info.get("Back")), "preferUnvisited": bool(info.get("PreferUnvisited")),
+                                 "links": chain_len(hid)}
                                 if name == "FightHitChainedComponent" else None),
-                    "move": move})
+                    "move": move, "disperse": disperse})
         # FightDamageComponentInfo.ChildSkillCfg: a skill cast on every unit this hit damages (its own coefficients,
         # statuses and forced move); its hits are appended right after, marked as children of this hit
         ch = dmg.get("ChildSkillCfg") or {}
@@ -207,6 +226,13 @@ def status_summary(sid, SD, rank_rows):
     if fo:
         s["falloff"] = {"pct": (fo.get("FalloffPercent") or 0) / 10000.0,
                         "start": fo.get("NumOfStart", 1), "max": fo.get("MaxFalloffCount", -1)}
+    if "FightStatusActionInvisibleComponent" in cs:
+        s["invisible"] = True                    # Stealth: never the main target while a visible ally can be
+    ri = cs.get("FightStatusRoundIntervalComponent")
+    if ri:
+        # the holder's next turn moves by RoundIntervalPercent of its interval, earlier when FastForward
+        s["roundInterval"] = {"pct": ri.get("RoundIntervalPercent", 0) or 0, "fastForward": bool(ri.get("FastForward")), "rate": ri.get("Rate", 1.0)}
+    s["canDisperse"] = bool(fs.get("CanDispersed"))
     if "FightStatusShieldPersistentComponent" in cs:
         s["shield"] = True
     if "FightStatusSkillStopCdComponent" in cs:
@@ -221,6 +247,7 @@ def status_summary(sid, SD, rank_rows):
     se = cs.get("StatusEndComponent")
     if se:
         s["onEnd"] = _trigger_cfgs(se.get("StatusTriggerSkillCfgs"))
+        s["removeApplyEntity"] = bool(se.get("RemoveApplyEntity"))      # a lifespan: the entity goes with the status
     ar = cs.get("FightStatusAgentRateComponent")
     if ar:
         s["boosts"] = {"actions": ar.get("LimitActionTypes") or [], "prop": ar.get("AddPropType")}
@@ -460,6 +487,17 @@ def charm_passive(status_ids):
             elif cname == "FightStatusActionExistComponent":
                 out.append(dict(base, kind="whileAction", rate=1.0, actions=info.get("Conditions") or [],
                                 triggers=[], statuses=[{"status": info["StatusId"], "chance": 1.0, "target": "Applicator"}] if info.get("StatusId") else []))
+            elif cname == "FightStatusMoveRangeComponent":
+                # an aura: units of TargetType inside Range carry the listed statuses (TargetCloseTriggerStatus)
+                ms = info.get("MoveRangeSetting") or {}
+                sts = [{"status": c["StatusId"], "chance": c.get("BasePercent", 1.0), "byProp": bool(c.get("AffectedByProp")),
+                        "target": c.get("ApplyTarget") or "TriggerTarget"} for c in (ms.get("TriggerStatusCfgs") or []) if c and c.get("StatusId")]
+                if sts:
+                    out.append(dict(base, kind="aura", rate=1.0, cells=[list(c) for c in (info.get("Range") or [])],
+                                    target=info.get("TargetType"), handle=ms.get("HanldeType"),
+                                    excludeDead=bool(info.get("IsExcludeDieTarget")), triggers=[], statuses=sts))
+                else:
+                    unmodelled.append(_human(cname))
             elif cname == "FightStatusHpIncreaseUnitComponent":
                 pass                                    # the mirror of hpUnit: stacks come off as HP climbs back; handled with hpUnit
             else:
@@ -559,6 +597,151 @@ def enrich(duel, SD):
             fsc = comp(eid, "FightSkillComponent") or {}
             h["childEle"] = fsc.get("ElementType") or "None"
 
+    _tab = {}
+
+    def tab(name, key):
+        if name not in _tab:
+            d = {}
+            for r in SD.table(name):
+                k = (r.get(key) or "").strip()
+                if k.isdigit():
+                    d[int(k)] = r
+            _tab[name] = d
+        return _tab[name]
+
+    def rank_factors(group):
+        """summon_rank_additive_factor: per skill rank, the share of each inherited prop (10000 = all of it)."""
+        out = {}
+        for r in SD.table("summon_rank_additive_factor"):
+            try:
+                if int((r.get("rank_group") or "").strip()) != group:
+                    continue
+                rk = int((r.get("Rank") or "").strip())
+            except Exception:
+                continue
+            out[str(rk)] = {k: int(v.strip()) / 10000.0 for k, v in r.items()
+                            if k not in ("rank_group", "Rank") and (v or "").strip().lstrip("-").isdigit()}
+        return out
+
+    _defs = {}
+
+    def creature_def(mid, label=None):
+        """A summoned creature as the engine spawns it. Stats follow BattleFormulaHandler.CalcSummonMonsterInheritProp:
+        fixed props = CalcSkillProps(summon_monster_fix_prop row, skill rank, skill level, caster sub-rank), i.e. the
+        level curve times the rank multiplier times the row's factor; inherited props = summon_monster_add_prop share
+        times the caster's prop times summon_rank_additive_factor[rank group][skill rank]. Skills and passives come
+        from monster_group, the prefab gives DestroyOnDie, the blocking body and the opening statuses."""
+        if mid in _defs:
+            if label and not _defs[mid].get("named"):
+                _defs[mid]["name"] = label; _defs[mid]["named"] = True
+            return _defs[mid]
+        fix = tab("summon_monster_fix_prop", "ClassId").get(mid)
+        add = tab("summon_monster_add_prop", "class_id").get(mid)
+        grp = tab("monster_group", "MonsterId").get(mid)
+        mon = tab("monster", "Id").get(mid)
+        if not fix or not add or not grp:
+            return None
+        cs = comps(mid)
+        rc = cs.get("FightRoleCharacterComponent") or {}
+        gt = cs.get("GridTransformComponent") or {}
+        try:
+            rankprop = int((fix.get("RankPropId") or "0").strip() or 0); group = int((fix.get("GroupLevelPropId") or "0").strip() or 0)
+        except Exception:
+            rankprop, group = 0, 0
+        fix_rows = {}
+        for rk in ranks_of(rankprop):
+            d = {}
+            for key in ("MaxHp", "Attack", "Defence", "Speed"):
+                try:
+                    fac = int((fix.get(key) or "0").strip() or 0)
+                except Exception:
+                    fac = 0
+                if not fac:
+                    continue
+                mult = SD.levelprop.get((rankprop, rk), {}).get(key, 10000)
+                d[key] = {"m": (mult / 10000.0) * (fac / 10000.0), "g": group, "k": key}
+            if d:
+                fix_rows[str(rk)] = d
+        addp = {}
+        for k, v in add.items():
+            v = (v or "").strip()
+            if k in ("class_id", "rank_group", "Memo") or not v.lstrip("-").isdigit() or int(v) == 0:
+                continue
+            addp[k] = int(v) / 10000.0
+        try:
+            rg = int((add.get("rank_group") or "0").strip() or 0)
+        except Exception:
+            rg = 0
+        skills = []
+        for sid in SD.ints(grp.get("ActiveSkills")):
+            row = skills_cfg.get(sid)
+            try:
+                eid = int(row["EcEntityId"]) if row and row.get("EcEntityId") else 0
+            except Exception:
+                eid = 0
+            ec = skill_ec(eid) if eid else None
+            ep = SD.eps.get(eid) or {}
+            try:
+                pvp = int((ep.get("PvpPropScale") or "10000").strip() or 10000)
+            except Exception:
+                pvp = 10000
+            rec = {"id": sid, "name": (SD.L(f"item_{sid}_name") if row else None) or f"skill {sid}", "ec": ec, "r": skill_rows(eid),
+                   "pvp": pvp, "gov": (ep.get("AffectedBySkillRank") or "").strip().upper() == "TRUE",
+                   "ele": (ec or {}).get("ele") or "None", "startCast": None, "kind": "Technique"}
+            if ec:
+                note_hits(ec["hits"]); child_rows(ec); summon_defs(ec)
+            skills.append(rec)
+        passives = []
+        for sid in SD.ints(grp.get("PassiveSkills")):
+            row = skills_cfg.get(sid) or {}
+            ids = [int(x) for x in re.findall(r"\d+", row.get("PassiveStatusIdList") or "")]
+            pas, _un = charm_passive(ids)
+            for p in pas:
+                for t in p.get("triggers", []):
+                    pending_skill.add(t["skill"])
+                for o in p.get("statuses", []):
+                    pending_status.add(o["status"])
+            passives.append({"id": sid, "name": (SD.L(f"item_{sid}_name") if row else None) or f"skill {sid}", "passive": pas, "props": None, "kind": "Charm"})
+        try:
+            move = int((grp.get("MoveDist") or "0").strip() or 0) / 10000.0
+        except Exception:
+            move = 0
+        d = {"id": mid, "name": label or (mon or {}).get("Memo") or f"summon {mid}", "named": bool(label),
+             "blocks": any(isinstance(b, dict) and b.get("GroundType") == "Wall" for b in (gt.get("BodyRangeInfos") or [])),
+             "destroyOnDie": bool(rc.get("DestroyOnDie", True)), "roundType": (cs.get("FightRoundComponent") or {}).get("RoundType"),
+             "characterType": (mon or {}).get("CharacterType"), "aiType": (mon or {}).get("AiType"),
+             "moveDist": move, "fixRows": fix_rows, "add": addp, "rankGroup": rg, "rankFactor": rank_factors(rg) if rg else {},
+             "skills": skills, "passives": passives,
+             "initStatuses": [x for x in ((cs.get("FightStatusAgentComponent") or {}).get("InitStatusEntityClassIds") or []) if x]}
+        for x in d["initStatuses"]:
+            pending_status.add(x)
+        _defs[mid] = d
+        return d
+
+    def summon_defs(ec, desc=None):
+        """Attach the creature definition to every summoning hit, and split its SummonStatus list into the
+        lifespan (the status whose end removes the entity) and the opening statuses (Stealth)."""
+        for h in ec.get("hits", []):
+            sm = h.get("summon")
+            if not sm or not sm.get("creature"):
+                continue
+            label = None
+            if desc:
+                m = re.search(r'data-tip="([^"\u2014]+?) \u2014 A unit summoned by this skill', desc)
+                if m:
+                    label = m.group(1).strip()
+            sm["def"] = creature_def(sm["creature"], label)
+            life, init = 0, []
+            for sid in sm.get("statuses") or []:
+                pending_status.add(sid)
+                summ = status_summary(sid, SD, status_rows)
+                if summ and summ.get("removeApplyEntity") and (summ.get("dur") or -1) > 0:
+                    life = summ["dur"]
+                else:
+                    init.append(sid)
+            sm["lifespan"] = life
+            sm["initStatuses"] = init
+
     def note_hits(hits):
         for h in hits:
             for o in h.get("on", []):
@@ -583,6 +766,7 @@ def enrich(duel, SD):
                 s["ele"] = "Physical"
             note_hits(ec["hits"])
             child_rows(ec)
+            summon_defs(ec, s.get("desc"))
         if s["kind"] == "Charm":
             ids = [int(x) for x in re.findall(r"\d+", row.get("PassiveStatusIdList") or "")]
             pas, unmod = charm_passive(ids)
@@ -618,6 +802,7 @@ def enrich(duel, SD):
             if ec:
                 note_hits(ec["hits"])
                 child_rows(ec)
+                summon_defs(ec)
             trig[str(sk)] = entry
         for sid in list(pending_status - set(int(k) for k in statuses)):
             summ = status_summary(sid, SD, status_rows)

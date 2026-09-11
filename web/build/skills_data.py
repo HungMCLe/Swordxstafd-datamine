@@ -567,6 +567,15 @@ def main():
             "skills": sk,
         })
 
+    # summoned creatures' fixed props (summon_monster_fix_prop) grow on the same level curves as skills
+    for _r in table("summon_monster_fix_prop"):
+        try:
+            _g = int((_r.get("GroupLevelPropId") or "0").strip() or 0)
+        except Exception:
+            continue
+        for _k in ("MaxHp", "Attack", "Defence", "Speed"):
+            if (_r.get(_k) or "0").strip() not in ("", "0"):
+                needed_curve.add((_g, _k))
     curves, lpid_of = {}, {}
     for g, prop in sorted(needed_curve):
         lpid_of.setdefault(str(g), {})

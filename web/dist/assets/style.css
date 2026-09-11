@@ -790,6 +790,8 @@ svg.abtree circle.nd{fill:var(--faint)} svg.abtree text{font:700 11px var(--body
 .token.acting{transform:scale(1.06);box-shadow:0 0 0 3px color-mix(in srgb,var(--gold-rail) 45%,transparent)}
 .token.hit{animation:tokhit .45s}
 .token.down{opacity:.35;filter:grayscale(1)}
+.token.summon{inset:7px;border-style:dashed;border-radius:50%;gap:1px}
+.token.summon .tname{font-size:9.5px}
 .token.picked{outline:3px solid var(--gold-rail)}
 .token .tname{font:700 11px var(--body);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 3px}
 .token .tcls{font:500 9.5px var(--body);color:var(--faint)}

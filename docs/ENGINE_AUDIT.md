@@ -71,9 +71,16 @@ Status codes: **V** verified in client code or data · **O** observed in real fi
 | T6 | `HitTargetType` Me/Enemy/Friend/FriendNotMe/All/None | V | `GameUtils` |
 | T7 | `SkillTargetType`: Entity needs a unit on the aim, PosCanStand a free cell (the caster leaps) | V | client |
 | T8 | random-target hits: one pick per HitCfg, with replacement, from the pool; empties allowed unless `AllowEmptyScope` off; `MiniHitTargetCount`; NotSame* flags | V | `FightHitRandomTargetComponentInfo` |
-| T9 | chained hits (Lightning Chain) treated as one pick | A | `FightHitChainedComponent` picker is server-side; one equipped skill |
+| T9 | chained hits: one strike plus N links (`NextHitList` depth), each link a random unit within the skill's own reach of the last victim, no repeats (`Repeat` off), never straight back (`Back` off) | V/A | `FightHitChainedComponentInfo`; the hop reach being the skill's `Range` is the reading that matches the card text ("within 4 grids of the target"); the random draw is server-side (fixed in the fourth pass) |
 | T10 | grid items from summoning hits (Meteoric Flames' Burn cells) | V | `SummonGridItemId` 3320 + status 11542 with `FightStatusMoveNearComponent` (TryAtStart / TryAtEnterRange / TryAtStandRound), 3 creator rounds, `RemoveAtRoundTargetDie` |
-| T11 | creature summons (Waterling Summon, Frenzy Totem, Stonechief Summon) | M | the cast is logged, no creature spawns |
+| T11 | creature summons: the creature spawns on the hit's `SummonScope` cell (nearest free if taken), acts at once (`SummonImmediateRound`), takes its own turns (`RoundDataDrive`), blocks its cell (`GroundType Wall`), is removed on death (`DestroyOnDie`) and fades after 5 of its own turns (lifespan status with `RemoveApplyEntity`); it never decides the result (`NotCheckFightResult`) or counts toward the cap | V | prefabs 3181/3184/3190, `monster`, `monster_group` (fixed in the fourth pass) |
+| T11b | summon stats: fixed part = `CalcSkillProps(summon_monster_fix_prop, skill rank, skill level, caster sub-rank)`; inherited part = caster prop × `summon_monster_add_prop` share × `summon_rank_additive_factor[rank group][rank]`; "Summons cannot receive any stat boosts" | V | `BattleFormulaHandler.CalcSummonMonsterInheritProp`, `CalcSkillProps`; the in-game tooltip |
+| T11c | summon skills and passives from `monster_group`, at the summoning skill's rank and level (`SummonSkillInfo`); opening cooldowns follow the fighters' rule | V/A | the opening-cooldown rule for a mid-fight entity is not in the client |
+| T11d | Stealth: never the main target of an attack or heal while a visible unit of the pool can be; still under areas | V | `FightStatusActionInvisibleComponent` + the in-game tooltip |
+| T11e | `FightStatusRoundIntervalComponent`: the holder's next turn moves by `RoundIntervalPercent` of its interval (earlier when `FastForward`) | V/A | the component; the exact arithmetic on the action bar is server-side |
+| T11f | `DisperseStatus` on a damage entity strips `Count` statuses of the listed types that allow it (`CanDispersed`) | V | `FightDamageComponentInfo.DisperseStatus` |
+| T11g | auras (`FightStatusMoveRangeComponent`, `TargetCloseTriggerStatus`): units of the target kind inside the range carry the status, checked on spawns and moves | V/A | the component; whether the buff drops on leaving is not in the client |
+| T11h | Decoy Clone (voodoo doll) and Blast Spirit (smart grid item) | M | equipped by nobody in the top 100 |
 | T12 | AI chain: the skill's own list, else the chain written on the 14 skills that carry one; the last cast uses `LastAIPriorityTypes` unless `DontKeepDistance` | V/A | criteria names V; the server's default chain is unknown |
 | T13 | criterion semantics (LowerTargetHp = HP ratio, SaferPos = distance to the nearest enemy, ...) | A | names only |
 | T14 | taunt, in the game's own words: "Taunted enemies target the caster only, and approach the caster when using damaging Techniques. Summoning Techniques remain available, but ally-targeting Techniques (grant buffs, healing, shields, etc.) are disabled while taunted." | V | in-game keyword tooltip. Implemented in the second pass: aim only at the taunter; ally-targeting Techniques unavailable (summoning ones stay); a damaging Technique never uses the keep-distance ordering and closes on the taunter to break ties. Where "approach" ranks among the skill's own priorities is server-side, so it sits last (A) |
@@ -125,7 +132,7 @@ Status codes: **V** verified in client code or data · **O** observed in real fi
 | S8 | hook chains stop at depth 4 | A | engine guard against runaway chains; labelled |
 | S9 | modelled Charm components: HitSkill, DamageSkill, RoundStart, RoundEnd, RoundCheck, SkillStart, SkillEnd (every Nth cast), HpDecreaseUnit/HpIncreaseUnit, HpBelow, HpLimit (death save), StatusStackCount, StatusApplyTargetHandle, DoDamageHandle, HitDmgAddPer, RoleDie (revive), DamageCustom (reflect), MoveNear (proximity and grid items), ActionEnd, HitCustomCure (lifesteal), KillSkill, ActionExist | V | `out/ec_decoded` components; `web/build/ec_data.py` |
 | S10 | grid-item statuses count on the creator's rounds and vanish with the creator | V | `RoundTarget Creator`, `StatusAutoRemove.RemoveAtRoundTargetDie` |
-| S11 | Fantomon (pets) | M | off the clock (`FollowMaster`), untargetable; not run |
+| S11 | Fantomon (pets): battlefield 910 spawns the engaged pet (`FightRolePetSpawnerComponent` on its root); the follower rides the master's cell (`GridTransformFollowerComponent`), is untargetable (`SafeAttacker`, no grid body), takes no turn (`FollowMaster`), fires its support skill when the master starts an Attack Technique (`FightAIFollowMasterComponent`, `MasterSkillTypes`, per-pet `CountConditionCfg`) with damage on the pet's own Attack | M | the follower form's props are server-side (`pet_battle` is dead config; `summon_monster_*` rows exist only for the materialized form); waits for a recorded fight |
 
 ## Third pass, 2026-09-09: non-elemental damage
 
@@ -170,6 +177,13 @@ more damage than expected, and whether the damage pipeline is really the client'
 - Added client rules that were missing: crit/block value terms and the attacker's block avoid in the divisor; the full `Cure()`; the governor gate per prop group (heals and shields never scaled); `HitTargetType` None/All; `SkillTargetType` checks; facing and flip rules; `SourceMoveList` leaps and damage `MoveCfg` pulls; random-target picks grouped per HitCfg; child skills on every covered unit; fourteen Charm component types.
 - Found and fixed in the final pass: hits typed `None` were dealing damage (Wind's Delight counted twice, 2.8M in one cast); falloff was counted per cast instead of per target and never reached child hits; when-hit Charms ignored their Block/Crit/Damage flags (Rebound struck back on every hit, killing its attacker in one cast); Meteoric Flames covered one cell instead of its 3×3 and spawned no Burn cells; round-start events were dropped from the log when the unit then cast.
 - The `_duel.json` dataset is rebuilt by `web/build/skills_data.py`; `site.py` only renders pages from it.
+
+## Fourth pass, 2026-09-10: summons, chains, the fight stream
+
+Creature summons are now run from the client's own tables and formulas (T11–T11g); Lightning Chain hops (T9);
+skills that target no unit (summons) can now be planned at all, which they could not be before. The pet mechanics
+are read (S11) but their numbers are not in the client. The decisive finding of this pass is that the client is a
+playback device (below): every rule still marked A or O is now within reach of a recorded fight.
 
 ## Ground truth
 
