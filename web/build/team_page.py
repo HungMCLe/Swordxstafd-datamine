@@ -79,7 +79,9 @@ the server's idle rule is not in the client. A fallen player keeps its cell (<co
 bodies block paths. Skills move fighters too: the caster's own dash or leap (<code>SourceMoveList</code>, Doom
 Blade) and the victim's pull or knockback (the damage's <code>MoveCfg</code>, Hunter's Judgment, Lunarwater
 Threads) land on the nearest free cell in the client's ring order when the exact cell is taken; a Frozen,
-Immobilized or Super Armor unit is not moved.</p>
+Immobilized or Super Armor unit is not moved. Every hit of a cast finds its targets where they stand when it
+lands, so a pull that drags enemies in front of the caster is followed by strikes on the cells they were
+dragged to.</p>
 <p><b>Damage, hit by hit.</b> Every hit runs the client's <code>Damage()</code>: attack times the skill's
 coefficient over the target's per-rank PvP scaler, plus the flat term, times ATK/(ATK+DEF), times the elemental
 ratio, times the percent block, over the class scaler, times the skill's <code>PvpPropScale</code>. The elemental

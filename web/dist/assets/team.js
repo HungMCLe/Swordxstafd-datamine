@@ -1441,7 +1441,15 @@
           occ = unitAt();
           return;
         }
-        (pl.perHit[hi] || []).forEach(function (foe) {
+        /* who a hit covers is decided when it lands, not when the cast was planned: an earlier hit of the same
+           cast may have pulled, knocked or leapt units into or out of this hit's cells (Hunter's Judgment drags
+           its targets in front of the caster and only then strikes the 3x3 there) */
+        var hOrigin = h.onSource ? me.pos : aim, occNow = unitAt(), covered = [];
+        (h.cells && h.cells.length ? h.cells : [[0, 0]]).forEach(function (c) {
+          var w = turn(c, dir, flip), u = occNow[(hOrigin.x + w[0]) + "," + (hOrigin.y + w[1])];
+          if (u && u.alive && pool.indexOf(u) >= 0 && covered.indexOf(u) < 0) covered.push(u);
+        });
+        covered.forEach(function (foe) {
           if (!foe.alive) return;
           var pf = partsFor(foe);
           if (pf.parts.heal && !targets[foe.i]) heal(foe, pf.parts.heal, pick.name);

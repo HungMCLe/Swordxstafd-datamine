@@ -86,6 +86,7 @@ Status codes: **V** verified in client code or data · **O** observed in real fi
 | T14 | taunt, in the game's own words: "Taunted enemies target the caster only, and approach the caster when using damaging Techniques. Summoning Techniques remain available, but ally-targeting Techniques (grant buffs, healing, shields, etc.) are disabled while taunted." | V | in-game keyword tooltip. Implemented in the second pass: aim only at the taunter; ally-targeting Techniques unavailable (summoning ones stay); a damaging Technique never uses the keep-distance ordering and closes on the taunter to break ties. Where "approach" ranks among the skill's own priorities is server-side, so it sits last (A) |
 | T15 | `BattleAISetting` weights (teammate distance, bunching penalty, same-buff weights) | M | unused by the client |
 | T16 | `HitTargetActionType` | — | a no-op in the client |
+| T17 | a hit's targets are the units under its cells at the moment it lands, after every earlier hit of the same cast has moved units (pulls, knockbacks, leaps) | V | the hits of one skill are separate entities landing at their own delays; fixed 2026-09-12 — Hunter's Judgment pulled its targets in front of the caster and then struck the cells they had left |
 
 ## Damage and rolls
 
