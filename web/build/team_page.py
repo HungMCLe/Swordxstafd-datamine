@@ -115,7 +115,21 @@ damaging hit under the same flags. The strike a Charm fires is a skill of its ow
 this page also stops any hook chain at depth four as a guard of its own. Also run from the prefabs: Linked
 Misfortune, Shadow Erosion, Curse Resonance and Pursuit of Victory, Resurrection, Reflective Armor, Repelling Wind,
 Gale Shield, Ripple Impact, Blade of Lament, Soul Splash, Defensive Assault, Eye for an Eye, and the HP-unit
-Charms whose stacks come off again as HP climbs back.</p>
+Charms whose stacks come off again as HP climbs back. The top-100 capture of 12 September brought the
+fourth-tier classes' Charms, all run from their components: Tactical Adaptation keeps its damage-up status while
+three or fewer enemies stand within two cells and swaps to its damage-down status when more do
+(<code>TargetCountAffectStatusOwnerSetting</code>, re-checked at every turn start, move, spawn and death);
+Soul Breaker adds one unit of its bonus per 15% of the target's max HP missing, five at most
+(<code>FightStatusHitApplyDamageComponent</code>); Holy Aegis grows the wearer's DEF-based shields by its
+percentage (<code>FightStatusPropByStatusComponent</code>); Explosive Spirit stacks its crit-rate status on every
+Fire Technique cast (<code>FightStatusSkillStartComponent</code> with an element condition); Iron Will and
+Aberrancy add the Charm's reduction to the damage stage when the attacker is taunted, or carries any debuff
+(<code>FightStatusDamageProcessComponent</code>, <code>FightStatusDamageReducePerComponent</code>); Summoner's
+Frenzy and Soul Spark put their status on the wearer's summons as they appear, Soul Spark's cutting the summon's
+lifespan by two turns to a floor of one (<code>FightStatusHitSummonComponent</code>,
+<code>FightStatusReduceStatusLifeComponent</code>); Soul Impact fires its Dark burst around a summon of the
+wearer's that falls or fades; Soul Pact Resonance holds its attack status while the wearer has a summon on the
+field (<code>FightStatusRoleSummonCountComponent</code>).</p>
 <p><b>Summoned creatures.</b> Waterling Summon, Frenzy Totem and Stonechief Summon are summoning hits
 (<code>FightHitSummon</code> with a <code>SummonId</code>): the creature appears on the cell the hit names relative
 to the caster, or the nearest free one, and acts at once (<code>SummonImmediateRound</code>). Its stats are the

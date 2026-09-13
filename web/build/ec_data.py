@@ -226,6 +226,9 @@ def status_summary(sid, SD, rank_rows):
     if fo:
         s["falloff"] = {"pct": (fo.get("FalloffPercent") or 0) / 10000.0,
                         "start": fo.get("NumOfStart", 1), "max": fo.get("MaxFalloffCount", -1)}
+    rl = cs.get("FightStatusReduceStatusLifeComponent")
+    if rl:
+        s["reduceLife"] = {"ids": rl.get("StatusClassIds") or [], "rounds": rl.get("ReduceRoundCount", 0) or 0}
     if "FightStatusActionInvisibleComponent" in cs:
         s["invisible"] = True                    # Stealth: never the main target while a visible ally can be
     ri = cs.get("FightStatusRoundIntervalComponent")
@@ -341,7 +344,7 @@ def charm_passive(status_ids):
             if kind:
                 trig = _trigger_cfgs(info.get("TriggerSkillCfgs") or info.get("SkillCfgs")
                                      or info.get("StatusTriggerSkillCfgs")) + _direct_skill(info)
-                sts = _status_cfgs(info.get("StatusCfgs") or info.get("TriggerStatusCfgs") or info.get("StatusTriggerStatusCfgs"))
+                sts = _status_cfgs(info.get("StatusCfgs") or info.get("TriggerStatusCfgs") or info.get("StatusTriggerStatusCfgs") or info.get("Status"))
                 # FightStatusDamageSkillComponent: StatusId goes on the damage target (the wearer), SourceStatusId on the attacker
                 if info.get("StatusId"):
                     sts.append({"status": info["StatusId"], "chance": 1.0, "byProp": False, "target": "Applicator"})
@@ -351,6 +354,20 @@ def charm_passive(status_ids):
                     unmodelled.append(_human(cname))
                     continue
                 pv = dict(base, kind=kind, triggers=trig, statuses=sts)
+                if cname == "FightStatusSkillStartComponent":
+                    # StatusSkillCondition settings: the cast's element and action type must match (Explosive Spirit: Fire Techniques)
+                    els, acts = [], []
+                    for st_ in (info.get("Settings") or []):
+                        if not isinstance(st_, dict):
+                            continue
+                        if st_.get("ElementType"):
+                            els.append(st_["ElementType"])
+                        if st_.get("ActionTypes"):
+                            acts.extend(st_["ActionTypes"])
+                    pv["elements"] = els
+                    pv["actionTypes"] = acts
+                    pv["cd"] = info.get("CD", 0) or 0
+                    pv["source"] = info.get("SkillStartSource") or "Applicator"
                 if cname in ("FightStatusDamageSkillComponent", "FightStatusHitSkillComponent"):
                     # each true flag restricts the event: Block = only a blocked hit, Crit = only a crit,
                     # Damage = only when damage landed, Cure = only a heal; ConditionCount = every Nth event
@@ -492,10 +509,62 @@ def charm_passive(status_ids):
                 ms = info.get("MoveRangeSetting") or {}
                 sts = [{"status": c["StatusId"], "chance": c.get("BasePercent", 1.0), "byProp": bool(c.get("AffectedByProp")),
                         "target": c.get("ApplyTarget") or "TriggerTarget"} for c in (ms.get("TriggerStatusCfgs") or []) if c and c.get("StatusId")]
-                if sts:
+                if ms.get("__type") == "TargetCountAffectStatusOwnerSetting":
+                    # TargetCount: "met when the number of targets is <= the configured count"; met statuses go on
+                    # while it holds and come off when it stops, the not-met list the other way round
+                    met = _status_cfgs(ms.get("MeetConditionTriggerStatusCfgs"))
+                    notmet = _status_cfgs(ms.get("NotMeetConditionTriggerStatusCfgs"))
+                    out.append(dict(base, kind="enemyCount", rate=1.0, cells=[list(c) for c in (info.get("Range") or [])],
+                                    target=info.get("TargetType"), count=ms.get("TargetCount", 0), excludeDead=bool(info.get("IsExcludeDieTarget")),
+                                    met=met, notMet=notmet, triggers=[], statuses=met + notmet))
+                elif sts:
                     out.append(dict(base, kind="aura", rate=1.0, cells=[list(c) for c in (info.get("Range") or [])],
                                     target=info.get("TargetType"), handle=ms.get("HanldeType"),
                                     excludeDead=bool(info.get("IsExcludeDieTarget")), triggers=[], statuses=sts))
+                else:
+                    unmodelled.append(_human(cname))
+            elif cname == "FightStatusHitApplyDamageComponent":
+                # a per-hit bonus (AddPercentPropType, from the Charm's own row) scaled by the target's lost HP:
+                # one unit per HpDecreaseUnit of max HP missing, at most MaxHpScale units (Soul Breaker)
+                out.append(dict(base, kind="dmgAddByHp", rate=1.0, prop=info.get("AddPercentPropType") or "StatusDmgAddPer",
+                                reduceProp=info.get("ReducePercentPropType"), unit=info.get("HpDecreaseUnit", 0) or 0,
+                                maxScale=info.get("MaxHpScale", 0) or 0, byTarget=info.get("ScaleByHpType") or "TriggerTarget",
+                                damageType=info.get("DamageType") or "Damage", triggers=[], statuses=[]))
+            elif cname == "FightStatusPropByStatusComponent":
+                # the wearer's own shield statuses that carry one of IncludeProptypes grow by the Charm's StatusShieldAddPercent (Holy Aegis)
+                out.append(dict(base, kind="shieldBoost", rate=1.0, includeProps=info.get("IncludeProptypes") or [],
+                                isShield=bool(info.get("IsShieldStatus")), hitTarget=info.get("HitTargetType") or "Me", triggers=[], statuses=[]))
+            elif cname == "FightStatusDamageProcessComponent":
+                # a stage in the damage the wearer takes (Target Applicator): when the attacker carries one of the listed
+                # actions (Iron Will: Ridicule), the Charm's ReducePercentPropType joins the reduction stage
+                out.append(dict(base, kind="dmgProcess", rate=1.0, target=info.get("Target") or "Applicator", phase=info.get("ProcessPhase"),
+                                damageType=info.get("DamageType") or "Damage", sourceActions=info.get("SourceActionTypes") or [],
+                                reduceProp=info.get("ReducePercentPropType"), addProp=info.get("AddPercentPropType"),
+                                checkEnemy=bool(info.get("CheckSourceIsEnemy")), triggers=[], statuses=[]))
+            elif cname == "FightStatusDamageReducePerComponent":
+                # damage taken drops by the Charm's StatusDmgReducePer, scaled by how many statuses of the listed types the
+                # attacker carries (Aberrancy: any debuff, at most one unit)
+                st = info.get("StatusType") or {}
+                out.append(dict(base, kind="dmgReduceByStatus", rate=info.get("Rate", 1.0), onDamage=bool(info.get("Damage", True)),
+                                needStatus=bool(st.get("IsCondition")), anyTypes=st.get("AnyStatusTypes") or [], on=st.get("Target") or "TriggerSource",
+                                scaleByCount=bool(info.get("ScalePropByStatusTypeCount")), countType=st.get("CountType"),
+                                maxCount=st.get("MaxStatusCount", -1), unit=st.get("Unit", 1.0), skillTargetType=info.get("SkillTargetType") or "All",
+                                prop="StatusDmgReducePer", triggers=[], statuses=[]))
+            elif cname == "FightStatusHitSummonComponent":
+                # hooks on the wearer's summons: a status put on them when created (Summoner's Frenzy, Soul Spark) or a
+                # skill fired where they fall or fade (Soul Impact)
+                trig = [{"skill": info["SkillId"], "chance": 1.0, "byProp": False, "target": "TriggerTarget", "source": "Applicator"}] if info.get("SkillId") else []
+                sts = [{"status": info["SummonStatusId"], "chance": 1.0, "byProp": False, "target": "TriggerTarget"}] if info.get("SummonStatusId") else []
+                out.append(dict(base, kind="summonHook", rate=info.get("Rate", 1.0), create=bool(info.get("Create")), remove=bool(info.get("Remove")),
+                                maxCount=info.get("MaxCount", -1), filterSubstitute=bool(info.get("FilterSubstitute")),
+                                tagRole=info.get("FilterFightTagRole") or "None", triggers=trig, statuses=sts))
+            elif cname == "FightStatusRoleSummonCountComponent":
+                # a status the wearer carries while it has a summon on the field (Soul Pact Resonance)
+                sc = info.get("StatusCfg") or {}
+                sts = [{"status": sc["StatusId"], "chance": sc.get("BasePercent", 1.0), "byProp": False, "target": sc.get("ApplyTarget") or "Applicator"}] if sc.get("StatusId") else []
+                if sts:
+                    out.append(dict(base, kind="summonCount", rate=1.0, updateStack=bool(info.get("UpdateStatusStack")), limit=info.get("LimitCount", 0) or 0,
+                                    triggers=[], statuses=sts))
                 else:
                     unmodelled.append(_human(cname))
             elif cname == "FightStatusHpIncreaseUnitComponent":
