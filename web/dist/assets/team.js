@@ -295,6 +295,15 @@
       else if (prop === "ShieldByConvertedCurHp") amt += v / 100 * holder.hp;
       else if (prop === "SkillFixedShield" || prop === "StatusFixedShieldAdd") amt += v;
     });
+    /* FightStatusPropByStatusComponent (Holy Aegis): the creator's shields that use one of IncludeProptypes grow by its StatusShieldAddPercent */
+    if (amt > 0) (creator.charms || []).forEach(function (ch) {
+      (ch && ch.sk && ch.sk.passive || []).forEach(function (pv) {
+        if (pv.kind !== "shieldBoost" || !pv.isShield) return;
+        if (!(pv.includeProps || []).some(function (p) { return row[p] !== undefined; })) return;
+        var r = (ch.sk.props || {})[String(ch.rank)] || {};
+        if (r.StatusShieldAddPercent) amt *= 1 + curveValue(r.StatusShieldAddPercent, ch.rank, ch.level, creator.s.rank.name) / 100;
+      });
+    });
     return amt;
   }
   function redundant(sk, me, foe) {
@@ -481,6 +490,7 @@
         st = { id: sid, meta: meta, dur: meta.dur, creator: creator.i, rank: rank, level: level, stacks: 1, props: lent || null, skills: meta.skillCount || 0 };
         tgt.st.push(st);
       }
+      if (meta.reduceLife && tgt.summon && tgt.life > 0) tgt.life = Math.max(1, tgt.life - (meta.reduceLife.rounds || 0));   /* FightStatusReduceStatusLifeComponent */
       var ri = meta.roundInterval;
       if (ri && (ri.rate === undefined || rng() < ri.rate)) {
         /* FightStatusRoundIntervalComponent: the holder's next turn moves by RoundIntervalPercent of its interval,
@@ -514,6 +524,7 @@
       var overflow = -u.hp;
       u.alive = false; u.hp = 0; u.st = []; u.shield = 0;
       if (u.summon && u.destroyOnDie) u.gone = true;                    /* FightRoleCharacterComponent.DestroyOnDie: the cell frees */
+      if (u.summon) onSummonGone(u); else auraSettle();
       gridFx = gridFx.filter(function (f) { return !(f.creator === u.i && f.meta.removeAtRoundTargetDie); });   /* StatusAutoRemove: RemoveAtRoundTargetDie */
       if (events) events.push({ kind: "down", who: u.i });
       if (by) onKill(by, u, overflow);
@@ -912,7 +923,7 @@
       /* a summon's lifespan status (StatusEndComponent.RemoveApplyEntity) counts its own turn ends */
       if (u.summon && u.alive && u.life > 0) {
         u.life--;
-        if (u.life === 0) { u.alive = false; u.hp = 0; u.st = []; u.shield = 0; u.gone = true; if (events) events.push({ kind: "expire", who: u.i }); }
+        if (u.life === 0) { u.alive = false; u.hp = 0; u.st = []; u.shield = 0; u.gone = true; if (events) events.push({ kind: "expire", who: u.i }); onSummonGone(u); }
       }
     }
     /* statuses that last N of the holder's skill casts (DurationSkillCount) */
@@ -1167,15 +1178,56 @@
       ents.push(u);
       (sm.initStatuses || []).forEach(function (sid) { applyStatus(u, sid, caster, rank, level, null, true); });
       if (events) events.push({ kind: "summon", who: caster.i, unit: u.i, name: def.name, to: [cell.x, cell.y] });
+      /* FightStatusHitSummonComponent with Create: the owner's Charm puts its status on the new summon (Summoner's Frenzy, Soul Spark) */
+      eachPassive(caster, function (pv, ch) {
+        if (pv.kind !== "summonHook" || !pv.create || rng() >= pv.rate) return;
+        (pv.statuses || []).forEach(function (o) {
+          var st = applyStatus(u, o.status, caster, ch.rank, ch.level);
+          if (st && events) events.push({ kind: "status", who: u.i, name: statusName(st.meta, st.props), tag: ch.name });
+        });
+      });
       auraSettle();
       return u;
     }
+    /* FightStatusHitSummonComponent with Remove: a skill fired where the owner's summon fell or faded (Soul Impact) */
+    function onSummonGone(u) {
+      var owner = ents[u.owner]; if (!owner || !owner.alive) return;
+      eachPassive(owner, function (pv, ch) {
+        if (pv.kind !== "summonHook" || !pv.remove || rng() >= pv.rate) return;
+        (pv.triggers || []).forEach(function (t) { fireSkillArea(t.skill, owner, { x: u.pos.x, y: u.pos.y }, ch.name, ch.rank, ch.level); });
+      });
+      auraSettle();
+    }
     /* an aura (FightStatusMoveRangeComponent, TargetCloseTriggerStatus): units of the target kind inside the holder's
        range carry its status; checked when something is summoned or moves */
+    function setKept(w, o, ch, on) {
+      var have = w.st.filter(function (x) { return x.id === o.status; })[0];
+      if (on && !have) { var st = applyStatus(w, o.status, w, ch.rank, ch.level); if (st && events) events.push({ kind: "status", who: w.i, name: statusName(st.meta, st.props), tag: ch.name }); }
+      else if (!on && have) removeStatus(w, have);
+    }
     function auraSettle() {
       ents.forEach(function (w) {
         if (!w.alive) return;
         eachPassive(w, function (pv, ch) {
+          if (pv.kind === "enemyCount") {
+            /* TargetCountAffectStatusOwnerSetting: met while the enemies inside the range number <= TargetCount */
+            var n = 0;
+            ents.forEach(function (u) {
+              if (u === w || !u.alive || u.gone) return;
+              if (pv.target === "Enemy" ? u.side === w.side : pv.target === "Friend" || pv.target === "FriendNotMe" ? u.side !== w.side : false) return;
+              if ((pv.cells || []).some(function (c) { return w.pos.x + c[0] === u.pos.x && w.pos.y + c[1] === u.pos.y; })) n++;
+            });
+            var met = n <= (pv.count || 0);
+            (pv.met || []).forEach(function (o) { setKept(w, o, ch, met); });
+            (pv.notMet || []).forEach(function (o) { setKept(w, o, ch, !met); });
+            return;
+          }
+          if (pv.kind === "summonCount") {
+            /* FightStatusRoleSummonCountComponent: the status stays while the wearer has a summon on the field */
+            var has = ents.some(function (u) { return u.summon && u.alive && !u.gone && u.owner === w.i; });
+            (pv.statuses || []).forEach(function (o) { setKept(w, o, ch, has); });
+            return;
+          }
           if (pv.kind !== "aura") return;
           ents.forEach(function (u) {
             if (!u.alive || u === w) return;
@@ -1203,7 +1255,7 @@
       var aim = pl.aim, dir = pl.dir;
       if (ec.flipSource !== false) me.flip = flipFor(me.pos, aim, me.flip);
       var flip = pl.flip;
-      if (slot >= 0) procs(me, "skillStart", pl.primary, pl.primary);
+      if (slot >= 0) procs(me, "skillStart", pl.primary, pl.primary, function (pv) { return !pv.elements || !pv.elements.length || pv.elements.indexOf(pick.ele) >= 0; });
       /* the caster's own displacement (SourceMoveList) comes first */
       (ec.sourceMove || []).forEach(function (cfg) { forceMove(me, cfg, me, aim, dir, flip, pick.name); });
       var occ = unitAt(), pool = poolFor(me, pick);
@@ -1226,7 +1278,37 @@
           }
           add += charmVal(ch, me, "StatusDmgAddPer") / 100 * n;
         });
+        /* FightStatusHitApplyDamageComponent: one unit per HpDecreaseUnit of the target's max HP missing, at most MaxHpScale */
+        eachPassive(me, function (pv, ch) {
+          if (pv.kind !== "dmgAddByHp" || !(pv.unit > 0)) return;
+          var missing = 1 - foe.hp / foe.s.hp, n = Math.floor(missing / pv.unit + 1e-9);
+          if (pv.maxScale > 0) n = Math.min(n, pv.maxScale);
+          if (n > 0) add += charmVal(ch, me, pv.prop || "StatusDmgAddPer") / 100 * n;
+        });
         return add;
+      }
+      /* the target's own reduction stage against this attacker: Iron Will (attacker taunted), Aberrancy (attacker debuffed) */
+      function reduceFor(foe) {
+        var red = 0;
+        eachPassive(foe, function (pv, ch) {
+          if (pv.kind === "dmgProcess") {
+            if (pv.checkEnemy && me.side === foe.side) return;
+            if ((pv.sourceActions || []).length && !me.st.some(function (x) { return pv.sourceActions.indexOf(x.meta.action) >= 0; })) return;
+            if (pv.reduceProp) red += charmVal(ch, foe, pv.reduceProp) / 100;
+          } else if (pv.kind === "dmgReduceByStatus") {
+            if (pv.skillTargetType === "Enemy" && me.side === foe.side) return;
+            var n = 1;
+            if (pv.needStatus) {
+              var cnt = 0; me.st.forEach(function (x) { if ((pv.anyTypes || []).indexOf(x.meta.type) >= 0) cnt++; });
+              if (!cnt) return;
+              n = pv.scaleByCount ? cnt : 1;
+              if (pv.maxCount > 0) n = Math.min(n, pv.maxCount);
+              n *= pv.unit || 1;
+            }
+            red += charmVal(ch, foe, pv.prop || "StatusDmgReducePer") / 100 * n;
+          }
+        });
+        return red;
       }
       var rows = pick.id === 0 ? {} : (pick.r[String(t.rank)] || {});
       var partsCache = {};
@@ -1235,6 +1317,8 @@
         var foeE = eff(foe, ents), mE = meE;
         var extra = boostFor(foe);
         if (extra) { mE = {}; Object.keys(meE).forEach(function (k) { mE[k] = meE[k]; }); mE.sadd = (meE.sadd || 0) + extra; }
+        var red = reduceFor(foe);
+        if (red) { var fE = {}; Object.keys(foeE).forEach(function (k) { fE[k] = foeE[k]; }); fE.sred = (foeE.sred || 0) + red; foeE = fE; }
         return partsCache[foe.i] = { E: foeE, mE: mE, parts: hitParts(mE, foeE, pick, rows, t.level) };
       }
       var hitTargets = {};      /* hit index -> units it damaged (for child skills) */
@@ -1436,6 +1520,7 @@
       me.st.forEach(function (x) { if (x.meta.action === "Ridicule" && ents[x.creator].alive && ents[x.creator].side !== me.side) me.taunt = ents[x.creator]; });
       /* starting a round on a grid item (TryAtStandRound) */
       fxAt(me.pos.x, me.pos.y).forEach(function (f) { if (f.meta.moveNear.onStand) fireGrid(f, me); });
+      auraSettle();
 
       me.st.slice().forEach(function (st) {
         (st.meta.roundStart || []).forEach(function (t) {
