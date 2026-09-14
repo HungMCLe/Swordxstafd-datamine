@@ -404,6 +404,7 @@ def render(layout, base_tables):
                        " is named by the stage table but does not exist in the client&rsquo;s reward table, so it is left out.</p>")
 
     body = f"""
+<div class="wrap">
 <p class="eyebrow">Progression</p>
 <h1>Material Realms and relics</h1>
 <p class="lede">What a swing in each Material Realm pays at every promotion, which fight unlocks each realm level, and
@@ -485,6 +486,7 @@ also takes universal shards of the same grade.</p>
 <code>CheckLevelLimits</code> read them; seasons from <code>astrological_season_config</code>. Names are the game's
 English strings. One assumption: the server pays the per-point reward per point of durability removed; the client
 never computes it, so a swing that overkills an object may pay for the whole roll or only for the durability left.</p>
+</div>
 </div>
 """
     return layout("Material Realms and relics",

@@ -942,3 +942,4 @@ svg.abtree circle.nd{fill:var(--faint)} svg.abtree text{font:700 11px var(--body
 .teamlog .combatlog{position:relative}
 
 table.xp tr.dim td{opacity:.5}
+table.xp .hint,p.hint{font-weight:400;color:var(--faint);font-size:11.5px}
