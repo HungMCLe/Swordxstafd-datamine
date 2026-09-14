@@ -54,6 +54,7 @@ NAV = [
     ("Pet trees",       "pet-trees.html",          "pettrees"),
     ("Arena",           "arena.html",              "arena"),
     ("XP",              "xp.html",                 "xp"),
+    ("Realms",          "realms.html",             "realms"),
     ("Cookbook",        "cookbook.html",           "cookbook"),
     ("Top-up ladder",   "top-up-ladder.html",      "topup"),
     ("Method",          "method.html",             "method"),
@@ -140,7 +141,8 @@ def base_tables():
     for r in rpg[2:]:
         if len(r) >= 3 and r[0].strip() == "1" and r[1].strip() and r[2].strip().isdigit():
             grp[r[1].strip()] = int(r[2])
-    name = {nm: (disp[i] if i < len(disp) else "(unreleased)") for i, (nm, _) in enumerate(sr)}
+    # the game's own SubRank strings (Godtouched = "Ethereal", Demigod = "Ascendant"); the list above is the fallback
+    name = {nm: (L(f"SubRank.{nm}") or (disp[i] if i < len(disp) else "(unreleased)")) for i, (nm, _) in enumerate(sr)}
     be = csvrows("level_prop_battle_extra")
     ix = {c.strip(): i for i, c in enumerate(be[0])}
     B, BA, BC = {}, {}, {}
@@ -207,6 +209,11 @@ inferred from testing, or translated by hand.</p>
     <h3>Top-up ladder</h3>
     <p>All 75 cumulative spending tiers, $5 to $150,000, with every reward and its real icon.</p>
     <span class="tag">Economy</span></a>
+  <a class="card" href="realms.html"><span class="rail"></span>
+    <h3>Material Realms and relics</h3>
+    <p>What a swing pays at every promotion, the fight that opens each realm level, and every relic level&rsquo;s
+    cost on the normal and season ladders.</p>
+    <span class="tag">Progression</span></a>
 </div>
 
 <h2>Why this exists</h2>
