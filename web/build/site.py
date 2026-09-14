@@ -16,6 +16,7 @@ import npc_page
 import pet_page
 import arena_page
 import xp_page
+import realms_page
 import cook_page
 import petability_page
 import petspend_page
@@ -236,8 +237,8 @@ per-rank damage scale (divided by 10,000) climbs steeply:</p>
 <tr><td>Master</td><td class="num">95</td></tr>
 <tr><td>Paragon</td><td class="num">300</td></tr>
 <tr><td>Saint</td><td class="num">700</td></tr>
-<tr><td>Ascendant I / II / III</td><td class="num">1,000 / 1,500 / 2,000</td></tr>
-<tr><td>Divinity I / II / III</td><td class="num">2,500 / 3,000 / 3,500</td></tr>
+<tr><td>Ethereal I / II / III</td><td class="num">1,000 / 1,500 / 2,000</td></tr>
+<tr><td>Ethereal IV / V / VI</td><td class="num">2,500 / 3,000 / 3,500</td></tr>
 </tbody></table><caption>The gap between two ranks, not the absolute value, sets the multiplier.</caption></div>
 
 <h2>3. Combat-rating suppression</h2>
@@ -344,6 +345,7 @@ def main():
     n += write("pets.html", pet_page.render(layout, DIST, OUT))
     n += write("arena.html", arena_page.render(layout))
     n += write("xp.html", xp_page.render(layout, base_tables))
+    n += write("realms.html", realms_page.render(layout, base_tables))
     n += write("cookbook.html", cook_page.render(layout, base_tables, DIST, OUT))
     n += write("pet-trees.html", petability_page.render(layout, base_tables, DIST, OUT, charts))
     n += write("combat/index.html", page_combat_index())
