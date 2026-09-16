@@ -46,11 +46,12 @@ JS = r"""
   var val = function (id) { var el = $(id); return el ? (Number(el.value) || 0) : 0; };
   var MAT = { ore: D.names.ore, refined: D.names.refined, rolla: D.names.rolla, essence: D.names.essence, sand: D.names.sand + " (plain-sand equivalent)", petxp: "Fantomon XP", xp: "Character XP" };
   var REALMS = [["ironvein", "Ironvein Pit", D.names.toolOre], ["gilded", "Gilded Depths", D.names.toolRolla], ["dread", "Dread Hollow", D.names.toolEssence], ["dustfall", "Dustfall Dune", D.names.toolSand]];
-  var PIECES = D.pieces;                     /* [key, name] x 5 */
+  var PIECES = D.pieces;
 
   function season() { return D.seasons[$("p_season").value]; }
   function fam() { return season().family; }
   function tier() { return $("p_tier").value; }
+  function caps() { return season().caps; }                 /* the caps at the season's top tier: past them a level is a season level */
   function ladder(sys) { return (D.ladders[fam()] || {})[sys] || []; }
   function gateFor(sl) {
     var g = season().gates, out = { skill: 0, equip: 0, relic: 0, pet: 0 };
@@ -82,18 +83,14 @@ JS = r"""
     if (ignoreRefined()) delete out.refined;
     return out;
   }
-  function tierCaps() { return season().capsBy[tier()] || season().caps; }
-  function prefill() {
-    var c = tierCaps();
-    PIECES.forEach(function (p) { $("lvl_equip_" + p[0]).value = c.equip; });
-    $("lvl_skill").value = c.skill; $("lvl_relic").value = c.relic; $("lvl_pet").value = c.pet;
-    $("p_prefill").textContent = "Normal levels pre-filled with the " + (season().tiers.filter(function (t) { return t[0] === tier(); })[0] || [0, tier()])[1] + " caps: gear " + c.equip + ", skills " + c.skill + ", relics " + c.relic + ", Fantomon " + c.pet + ". Edit them if you are below the cap.";
+  function split(sys, shown) {                  /* a shown level -> [normal part, season part] */
+    var cap = caps()[sys]; return [Math.min(shown, cap), Math.max(0, shown - cap)];
   }
   function fillTiers() {
     var s = season(), sel = $("p_tier"), cur = sel.value; sel.innerHTML = "";
     s.tiers.forEach(function (t) { var o = document.createElement("option"); o.value = t[0]; o.textContent = t[1] + " (x" + t[2] + ")"; sel.appendChild(o); });
     sel.value = s.tiers.some(function (t) { return t[0] === cur; }) ? cur : s.top;
-    $("p_caps").textContent = "Season " + s.n + " (" + s.name + "): season levels open at " + s.topName + ". Caps there: character " + s.caps.player + ", gear " + s.caps.equip + ", skills " + s.caps.skill + ", relics " + s.caps.relic + ", Fantomon " + s.caps.pet + ". Points per season level: character " + s.rates.player + ", gear " + s.rates.equip + ", skills " + s.rates.skill + ", Fantomon " + s.rates.pet + ", relics " + s.rates.relic + ". Primostars = score / " + s.divisor + " (rounded down) + " + s.fixed + ".";
+    $("p_caps").innerHTML = "Season " + s.n + " (" + s.name + "): levels past the caps are <b>season levels</b> and only they score. Caps at " + s.topName + ": character " + s.caps.player + ", gear " + s.caps.equip + ", skills " + s.caps.skill + ", relics " + s.caps.relic + ", Fantomon " + s.caps.pet + ". Points per season level: character " + s.rates.player + ", gear " + s.rates.equip + ", skills " + s.rates.skill + ", Fantomon " + s.rates.pet + ", relics " + s.rates.relic + ". " + D.names.star + " = score / " + s.divisor + " (rounded down) + " + s.fixed + ".";
     ["equip", "skill", "relic", "pet", "player"].forEach(function (sys) { var el = $("cap_" + sys); if (el) el.textContent = s.caps[sys]; });
   }
   function grade(score) {
@@ -108,61 +105,40 @@ JS = r"""
     return d;
   }
   function buysOf(r) { return Math.max(0, Math.min(D.tools.max, val("buy_" + r))); }
-  function toolsTable(sw) {
-    var trs = "", worst = 0, worstName = "", dawDay = 0, totalDaw = 0, totalSw = 0, buysTotal = 0;
-    REALMS.forEach(function (r) {
-      var n = sw[r[0]], b = buysOf(r[0]), tools = b * D.tools.pack, daw = dawniumFor(b); buysTotal += b;
-      if (!n) { if (b) dawDay += 0; return; }
-      totalSw += n;
-      var days = tools ? Math.ceil(n / tools) : Infinity; if (days > worst) { worst = days; worstName = r[1]; }
-      dawDay += daw; totalDaw += (isFinite(days) ? days : 0) * daw;
-      trs += "<tr><th>" + r[1] + "</th><td class=num>" + fmt(Math.ceil(n)) + " " + r[2] + "</td><td class=num>" + b + " &times; " + D.tools.pack + " = " + tools + "</td><td class=num>" + (isFinite(days) ? fmt(days) + " days" : "never (0 bought)") + "</td><td class=num>" + fmt(daw) + "</td><td class=num>" + (isFinite(days) ? fmt(days * daw) : "&mdash;") + "</td></tr>";
-    });
-    $("out_tools").innerHTML = trs || "<tr><td colspan=6>No realm materials needed.</td></tr>";
-    if (!trs) { $("out_days").innerHTML = ""; return; }
-    /* a balanced split: the same number of purchases a day, shared in proportion to the swings each realm needs */
-    var need = REALMS.map(function (r) { return sw[r[0]] || 0; }), tot = need.reduce(function (a, b) { return a + b; }, 0);
-    var split = need.map(function (n) { return n > 0 ? Math.max(1, Math.round(buysTotal * n / tot)) : 0; });
-    var over = split.reduce(function (a, b) { return a + b; }, 0) - buysTotal;
-    while (over > 0) { var i = split.indexOf(Math.max.apply(null, split)); if (split[i] > 1) { split[i]--; over--; } else break; }
-    while (over < 0) { var j = -1, best = -1; need.forEach(function (n, k) { if (n > 0) { var d = n / ((split[k] + 1) * D.tools.pack); var cur = n / (split[k] * D.tools.pack); if (cur - d > best) { best = cur - d; j = k; } } }); if (j < 0) break; split[j]++; over++; }
-    var bDays = 0, bDaw = 0; need.forEach(function (n, k) { if (n > 0) { var d = Math.ceil(n / (split[k] * D.tools.pack)); if (d > bDays) bDays = d; bDaw += dawniumFor(split[k]); } });
-    var same = REALMS.every(function (r, k) { return split[k] === buysOf(r[0]); });
-    $("out_days").innerHTML = "With your split you finish in <b>" + fmt(worst) + " days</b> (" + worstName + " is the slowest) at " + fmt(dawDay) + " " + D.names.dawnium + " a day, about " + fmt(totalDaw) + " in all." +
-      (same ? " That split is already balanced." : " Same " + buysTotal + " purchases a day, balanced to finish together: " + REALMS.map(function (r, k) { return split[k] + " " + r[2]; }).join(", ") + " &rarr; <b>" + fmt(bDays) + " days</b> at " + fmt(bDaw) + " " + D.names.dawnium + " a day. <button type=\"button\" class=\"pickbtn\" id=\"p_usesplit\">Use this split</button>");
-    var btn = $("p_usesplit"); if (btn) btn.addEventListener("click", function () { REALMS.forEach(function (r, k) { $("buy_" + r[0]).value = split[k]; }); compute(); showPlan(); });
+  function budget() {                          /* tools available per realm in the days left: bag + days x buys x pack */
+    var days = val("p_days"), b = {};
+    REALMS.forEach(function (r) { b[r[0]] = val("bag_" + r[0]) + days * buysOf(r[0]) * D.tools.pack; });
+    return b;
   }
-  /* the units the planner walks: 5 gear pieces, skills x slots, relics x count */
+  /* the units the planner walks: 5 gear pieces, skills x slots, relics x count; levels are the SHOWN level */
   function unitsList() {
-    var list = PIECES.map(function (p) { return { sys: "equip", key: p[0], name: p[1], mult: 1, cur: val("cur_equip_" + p[0]), lvl: $("lvl_equip_" + p[0]).value, tgtId: "tgt_equip_" + p[0] }; });
-    list.push({ sys: "skill", key: "skill", name: "Skills", mult: val("n_skill"), cur: val("cur_skill"), lvl: $("lvl_skill").value, tgtId: "tgt_skill" });
-    list.push({ sys: "relic", key: "relic", name: "Relics", mult: val("n_relic"), cur: val("cur_relic"), lvl: $("lvl_relic").value, tgtId: "tgt_relic" });
+    var list = PIECES.map(function (p) { return { sys: "equip", name: p[1], mult: 1, cur: val("cur_equip_" + p[0]), tgtId: "tgt_equip_" + p[0] }; });
+    list.push({ sys: "skill", name: "Skills", mult: val("n_skill"), cur: val("cur_skill"), tgtId: "tgt_skill" });
+    list.push({ sys: "relic", name: "Relics", mult: val("n_relic"), cur: val("cur_relic"), tgtId: "tgt_relic" });
     return list;
   }
+  function charSeason(shown) { return Math.max(0, shown - caps().player); }
   function compute() {
-    var s = season(), tl = val("tgt_player"), gate = gateFor(tl), notes = [], pts = 0, cost = {}, rows = "";
+    var s = season(), tgtChar = Math.max(val("tgt_player"), val("cur_player")), gate = gateFor(charSeason(tgtChar)), notes = [], pts = 0, cost = {}, rows = "";
     unitsList().forEach(function (u) {
-      var tgt = val(u.tgtId), lad = ladder(u.sys), max = Math.min(gate[u.sys], lad.length);
-      if (tgt > max) { notes.push(u.name + ": target " + tgt + " cut to " + max + " (gate at character season level " + tl + ": " + gate[u.sys] + "; ladder " + lad.length + ")"); tgt = max; }
-      if (tgt < u.cur) tgt = u.cur;
+      var tgt = Math.max(val(u.tgtId), u.cur), lad = ladder(u.sys), cap = caps()[u.sys];
+      var cs = split(u.sys, u.cur), ts = split(u.sys, tgt), maxS = Math.min(gate[u.sys], lad.length);
+      if (ts[1] > maxS) { notes.push(u.name + ": level " + tgt + " needs season level " + ts[1] + "; at character level " + tgtChar + " the gate allows " + gate[u.sys] + " (ladder " + lad.length + "), so it is cut to " + (cap + maxS)); ts[1] = maxS; tgt = cap + maxS; }
       var c = {};
-      for (var k = u.cur + 1; k <= tgt; k++) { var lc = levelCost(u.sys, k); if (lc) addCost(c, lc, u.mult); }
-      var nlv = Number(u.lvl);
-      if (u.lvl !== "" && !isNaN(nlv) && nlv < s.caps[u.sys]) addCost(c, normalCost(u.sys, nlv, s.caps[u.sys]), u.mult);
-      var p = (tgt - u.cur) * s.rates[u.sys] * u.mult; pts += p; addCost(cost, c);
+      if (ts[0] > cs[0]) addCost(c, normalCost(u.sys, cs[0], ts[0]), u.mult);
+      for (var k = cs[1] + 1; k <= ts[1]; k++) { var lc = levelCost(u.sys, k); if (lc) addCost(c, lc, u.mult); }
+      var p = (ts[1] - cs[1]) * s.rates[u.sys] * u.mult; pts += p; addCost(cost, c);
       var sw = swingsFor(c), mats = Object.keys(c).filter(function (k) { return c[k] > 0; }).map(function (k) { return fmt(c[k]) + " " + MAT[k]; }).join(", ");
-      rows += "<tr><th>" + u.name + "</th><td class=num>" + u.cur + " &rarr; " + tgt + (u.mult > 1 ? " &times; " + u.mult : "") + "</td><td class=num>" + fmt(p) + "</td><td>" + (mats || "&mdash;") + "</td><td class=num>" + (total(sw) ? fmt(total(sw)) : "&mdash;") + "</td></tr>";
+      rows += "<tr><th>" + u.name + "</th><td class=num>" + u.cur + " &rarr; " + tgt + (u.mult > 1 ? " &times; " + u.mult : "") + "</td><td class=num>" + (ts[1] - cs[1]) + "</td><td class=num>" + fmt(p) + "</td><td>" + (mats || "&mdash;") + "</td><td class=num>" + (total(sw) ? fmt(total(sw)) : "&mdash;") + "</td></tr>";
     });
     /* Fantomon and character: XP, not swings */
-    var pc = val("cur_pet"), pt = Math.min(val("tgt_pet"), Math.min(gate.pet, ladder("pet").length)), pn = val("n_pet");
-    if (val("tgt_pet") > pt) notes.push("Fantomon: target cut to " + pt + " by the gate or ladder");
-    if (pt < pc) pt = pc;
-    var pl = ladder("pet"), pxp = ((pl[pt - 1] || 0) - (pc > 0 ? (pl[pc - 1] || 0) : 0)) * pn, pp = (pt - pc) * s.rates.pet * pn; pts += pp;
-    rows += "<tr><th>Fantomon</th><td class=num>" + pc + " &rarr; " + pt + (pn > 1 ? " &times; " + pn : "") + "</td><td class=num>" + fmt(pp) + "</td><td>" + (pxp ? fmt(pxp) + " Fantomon XP" : "&mdash;") + "</td><td class=num>&mdash;</td></tr>";
-    var cc = val("cur_player"), sc = D.playerScore[fam()] || [], cl = ladder("player");
-    if (tl < cc) tl = cc;
-    var cp = (sc[tl - 1] || 0) - (cc > 0 ? (sc[cc - 1] || 0) : 0), cxp = (cl[tl - 1] || 0) - (cc > 0 ? (cl[cc - 1] || 0) : 0); pts += cp;
-    rows += "<tr><th>Character</th><td class=num>" + cc + " &rarr; " + tl + "</td><td class=num>" + fmt(cp) + "</td><td>" + (cxp ? fmt(cxp) + " Character XP" : "&mdash;") + "</td><td class=num>&mdash;</td></tr>";
+    var pcur = val("cur_pet"), ptgt = Math.max(val("tgt_pet"), pcur), pn = val("n_pet"), pl = ladder("pet"), pcs = split("pet", pcur), pts_ = split("pet", ptgt), pmax = Math.min(gate.pet, pl.length);
+    if (pts_[1] > pmax) { notes.push("Fantomon: level " + ptgt + " cut to " + (caps().pet + pmax) + " by the gate or the ladder"); pts_[1] = pmax; ptgt = caps().pet + pmax; }
+    var pxp = ((D.xp.pet[pts_[0]] || 0) - (D.xp.pet[pcs[0]] || 0) + (pl[pts_[1] - 1] || 0) - (pcs[1] > 0 ? pl[pcs[1] - 1] : 0)) * pn, pp = (pts_[1] - pcs[1]) * s.rates.pet * pn; pts += pp;
+    rows += "<tr><th>Fantomon</th><td class=num>" + pcur + " &rarr; " + ptgt + (pn > 1 ? " &times; " + pn : "") + "</td><td class=num>" + (pts_[1] - pcs[1]) + "</td><td class=num>" + fmt(pp) + "</td><td>" + (pxp > 0 ? fmt(pxp) + " Fantomon XP" : "&mdash;") + "</td><td class=num>&mdash;</td></tr>";
+    var ccur = val("cur_player"), ccs = split("player", ccur), cts = split("player", tgtChar), sc = D.playerScore[fam()] || [], cl = ladder("player");
+    var cp = (sc[cts[1] - 1] || 0) - (ccs[1] > 0 ? sc[ccs[1] - 1] : 0), cxp = (D.xp.player[cts[0]] || 0) - (D.xp.player[ccs[0]] || 0) + (cl[cts[1] - 1] || 0) - (ccs[1] > 0 ? cl[ccs[1] - 1] : 0); pts += cp;
+    rows += "<tr><th>Character</th><td class=num>" + ccur + " &rarr; " + tgtChar + "</td><td class=num>" + (cts[1] - ccs[1]) + "</td><td class=num>" + fmt(cp) + "</td><td>" + (cxp > 0 ? fmt(cxp) + " Character XP" : "&mdash;") + "</td><td class=num>&mdash;</td></tr>";
     var stars = Math.floor(pts / s.divisor) + s.fixed;
     $("out_rows").innerHTML = rows;
     $("out_sum").innerHTML = "<b>" + fmt(pts) + " points</b> &rarr; Progression grade <b>" + grade(pts) + "</b> &rarr; <b>" + fmt(stars) + " " + D.names.star + "</b> (" + fmt(pts) + " / " + s.divisor + " + " + s.fixed + "), enough for Astral Pact level " + pactLevels(stars) + " of " + D.pact.length + " from zero.";
@@ -170,71 +146,103 @@ JS = r"""
     $("out_notes").innerHTML = notes.length ? "<li>" + notes.join("</li><li>") + "</li>" : "";
     bestNext(gate);
   }
+  function toolsTable(sw) {
+    var days = val("p_days"), trs = "", worst = 0, worstName = "", dawDay = 0, totalDaw = 0, buysTotal = 0, late = [], needBuys = {};
+    REALMS.forEach(function (r) {
+      var n = Math.max(0, sw[r[0]] - val("bag_" + r[0])), b = buysOf(r[0]), tools = b * D.tools.pack, daw = dawniumFor(b); buysTotal += b;
+      if (n <= 0) { if (sw[r[0]] > 0) trs += "<tr><th>" + r[1] + "</th><td class=num>" + fmt(Math.ceil(sw[r[0]])) + " " + r[2] + "</td><td colspan=4>covered by the tools in your bag</td></tr>"; return; }
+      var d = tools ? Math.ceil(n / tools) : Infinity; if (d > worst) { worst = d; worstName = r[1]; }
+      dawDay += daw; totalDaw += (isFinite(d) ? d : 0) * daw;
+      var nb = days > 0 ? Math.ceil(n / (days * D.tools.pack)) : Infinity; needBuys[r[0]] = nb;
+      if (days > 0 && (!isFinite(d) || d > days)) late.push(r[1] + " needs " + (nb <= D.tools.max ? nb + " buys a day (" + fmt(dawniumFor(nb)) + " " + D.names.dawnium + ")" : "more than the shop sells (" + D.tools.max + " buys a day)"));
+      trs += "<tr><th>" + r[1] + "</th><td class=num>" + fmt(Math.ceil(sw[r[0]])) + " " + r[2] + "</td><td class=num>" + b + " &times; " + D.tools.pack + " = " + tools + "</td><td class=num>" + (isFinite(d) ? fmt(d) + " days" : "never (0 bought)") + (days > 0 && isFinite(d) && d > days ? " <span class=warn>late</span>" : "") + "</td><td class=num>" + fmt(daw) + "</td><td class=num>" + (isFinite(d) ? fmt(d * daw) : "&mdash;") + "</td></tr>";
+    });
+    $("out_tools").innerHTML = trs || "<tr><td colspan=6>No realm materials needed.</td></tr>";
+    if (!worst) { $("out_days").innerHTML = trs ? "Everything is covered by the tools in your bag." : ""; return; }
+    var need = REALMS.map(function (r) { return Math.max(0, (sw[r[0]] || 0) - val("bag_" + r[0])); }), tot = need.reduce(function (a, b) { return a + b; }, 0);
+    var sp = need.map(function (n) { return n > 0 ? Math.max(1, Math.round(buysTotal * n / tot)) : 0; });
+    var over = sp.reduce(function (a, b) { return a + b; }, 0) - buysTotal;
+    while (over > 0) { var i = sp.indexOf(Math.max.apply(null, sp)); if (sp[i] > 1) { sp[i]--; over--; } else break; }
+    while (over < 0) { var j = -1, best = -1; need.forEach(function (n, k) { if (n > 0) { var gain = n / (sp[k] * D.tools.pack) - n / ((sp[k] + 1) * D.tools.pack); if (gain > best) { best = gain; j = k; } } }); if (j < 0) break; sp[j]++; over++; }
+    var bDays = 0, bDaw = 0; need.forEach(function (n, k) { if (n > 0) { var d = Math.ceil(n / (sp[k] * D.tools.pack)); if (d > bDays) bDays = d; bDaw += dawniumFor(sp[k]); } });
+    var same = REALMS.every(function (r, k) { return sp[k] === buysOf(r[0]); });
+    var txt = "With your split you finish in <b>" + fmt(worst) + " days</b> (" + worstName + " is the slowest) at " + fmt(dawDay) + " " + D.names.dawnium + " a day, about " + fmt(totalDaw) + " in all.";
+    if (days > 0) txt += worst <= days ? " That fits the <b>" + days + " days</b> left." : " That is <b>" + fmt(worst - days) + " days too late</b> for the " + days + " days left: " + late.join("; ") + ".";
+    if (!same) txt += " Same " + buysTotal + " purchases a day, balanced to finish together: " + REALMS.map(function (r, k) { return sp[k] + " " + r[2]; }).join(", ") + " &rarr; <b>" + fmt(bDays) + " days</b> at " + fmt(bDaw) + " " + D.names.dawnium + " a day. <button type=\"button\" class=\"pickbtn\" id=\"p_usesplit\">Use this split</button>";
+    $("out_days").innerHTML = txt;
+    var btn = $("p_usesplit"); if (btn) btn.addEventListener("click", function () { REALMS.forEach(function (r, k) { $("buy_" + r[0]).value = sp[k]; }); compute(); });
+  }
   function bestNext(gate) {
     var s = season(), list = [];
     unitsList().forEach(function (u) {
-      var lad = ladder(u.sys);
-      for (var k = u.cur + 1; k <= Math.min(u.cur + 40, lad.length); k++) {
+      var lad = ladder(u.sys), cs = split(u.sys, u.cur), cap = caps()[u.sys];
+      for (var k = cs[1] + 1; k <= Math.min(cs[1] + 40, lad.length); k++) {
         var c = levelCost(u.sys, k); if (!c) break;
         var sw = total(swingsFor(c));
-        list.push({ name: u.name, k: k, pts: s.rates[u.sys], sw: sw, ppw: s.rates[u.sys] / sw, open: k <= gate[u.sys] });
+        list.push({ name: u.name, lvl: cap + k, pts: s.rates[u.sys], sw: sw, ppw: s.rates[u.sys] / sw, open: k <= gate[u.sys] });
       }
     });
     list.sort(function (a, b) { return b.ppw - a.ppw; });
     var h = "";
     list.slice(0, 12).forEach(function (x) {
-      h += "<tr" + (x.open ? "" : " class=dim") + "><th>" + x.name + " +" + x.k + "</th><td class=num>" + x.pts + "</td><td class=num>" + fmt(x.sw, 1) + "</td><td class=num>" + x.ppw.toFixed(2) + "</td><td>" + (x.open ? "open" : "needs a higher character season level") + "</td></tr>";
+      h += "<tr" + (x.open ? "" : " class=dim") + "><th>" + x.name + " to " + x.lvl + "</th><td class=num>" + x.pts + "</td><td class=num>" + fmt(x.sw, 1) + "</td><td class=num>" + x.ppw.toFixed(2) + "</td><td>" + (x.open ? "open" : "needs a higher character level") + "</td></tr>";
     });
     $("out_best").innerHTML = h;
   }
-  /* greedy plan: from the current season levels, buy the level with the most points per swing until the goal */
-  function plan() {
-    var s = season(), tl = val("tgt_player"), gate = gateFor(tl);
+  /* greedy: buy the season level with the most points per swing, within the gates and (optionally) the tools available */
+  function plan(limitByTime) {
+    var s = season(), tgtChar = Math.max(val("tgt_player"), val("cur_player")), gate = gateFor(charSeason(tgtChar));
     var goal = val("p_goal"), need = $("p_goalkind").value === "stars" ? Math.max(0, (goal - s.fixed) * s.divisor) : goal;
-    var units = unitsList().map(function (u) { u.bought = 0; return u; });
-    /* points already in hand or promised by the Fantomon and character fields */
+    var units = unitsList().map(function (u) { var sp = split(u.sys, u.cur); u.curS = sp[1]; u.curN = sp[0]; u.bought = 0; u.pre = {}; return u; });
+    var bud = budget(), used = { ironvein: 0, gilded: 0, dread: 0, dustfall: 0 };
+    /* the normal ladder to the cap is a precondition, paid first */
+    units.forEach(function (u) { if (u.curN < caps()[u.sys]) { u.pre = normalCost(u.sys, u.curN, caps()[u.sys]); var sw = swingsFor(u.pre); for (var r in sw) used[r] += sw[r] * u.mult; } });
     var have = 0;
-    units.forEach(function (u) { have += u.cur * s.rates[u.sys] * u.mult; });
-    var pc = val("cur_pet"), pt = Math.max(pc, Math.min(val("tgt_pet"), gate.pet)), cc = val("cur_player"), sc = D.playerScore[fam()] || [];
-    have += pt * s.rates.pet * val("n_pet") + (sc[Math.max(tl, cc) - 1] || 0);
+    units.forEach(function (u) { have += u.curS * s.rates[u.sys] * u.mult; });
+    var pcs = split("pet", val("cur_pet")), pts_ = split("pet", Math.max(val("tgt_pet"), val("cur_pet"))), sc = D.playerScore[fam()] || [], cS = charSeason(val("cur_player"));
+    have += Math.max(0, Math.min(pts_[1], gate.pet) - pcs[1]) * s.rates.pet * val("n_pet") + (sc[charSeason(tgtChar) - 1] || 0) - (cS > 0 ? (sc[cS - 1] || 0) : 0);
+    units.forEach(function (u) { have -= u.curS * s.rates[u.sys] * u.mult; });   /* count only levels gained, like the table */
     var cost = {}, guard = 0;
-    while (have < need && guard++ < 20000) {
+    while ((limitByTime || have < need) && guard++ < 20000) {
       var best = null;
       units.forEach(function (u) {
-        var k = u.cur + u.bought + 1; if (k > gate[u.sys] || u.mult <= 0) return;
+        var k = u.curS + u.bought + 1; if (k > gate[u.sys] || u.mult <= 0) return;
         var c = levelCost(u.sys, k); if (!c) return;
-        var sw = total(swingsFor(c)) * u.mult, ppw = s.rates[u.sys] * u.mult / sw;
-        if (!best || ppw > best.ppw) best = { u: u, c: c, ppw: ppw };
+        var sw = swingsFor(c), t = total(sw) * u.mult; if (t <= 0) return;
+        if (limitByTime) { var fits = true; for (var r in sw) if (used[r] + sw[r] * u.mult > bud[r] + 1e-9) fits = false; if (!fits) return; }
+        var ppw = s.rates[u.sys] * u.mult / t;
+        if (!best || ppw > best.ppw) best = { u: u, c: c, sw: sw, ppw: ppw };
       });
       if (!best) break;
       best.u.bought++; have += s.rates[best.u.sys] * best.u.mult; addCost(cost, best.c, best.u.mult);
+      for (var r2 in best.sw) used[r2] += best.sw[r2] * best.u.mult;
     }
-    return { units: units, have: have, need: need, cost: cost, reached: have >= need };
+    return { units: units, have: have, need: need, cost: cost, reached: have >= need, used: used, bud: bud };
   }
-  function showPlan() {
-    var s = season(), p = plan(), sw = swingsFor(p.cost);
-    if (p.need <= 0) { $("out_goal").innerHTML = "Enter a goal above."; return; }
-    var parts = p.units.filter(function (u) { return u.bought > 0; }).map(function (u) { return u.name + " to +" + (u.cur + u.bought) + (u.mult > 1 ? " on " + u.mult : ""); });
-    $("out_goal").innerHTML = (p.reached ? "Reachable: " : "Not reachable at the target character season level (the gates cap it): ") + (parts.join(", ") || "nothing to buy") +
-      " &rarr; " + fmt(p.have) + " points (" + fmt(Math.floor(p.have / s.divisor) + s.fixed) + " " + D.names.star + ") for about " + fmt(total(sw)) + " swings: " +
-      REALMS.filter(function (r) { return sw[r[0]] > 0; }).map(function (r) { return fmt(Math.ceil(sw[r[0]])) + " in " + r[1]; }).join(", ") + ". Press Recommend to write these targets into the fields above.";
+  function describe(p, timeMode) {
+    var s = season(), parts = p.units.filter(function (u) { return u.bought > 0; }).map(function (u) { return u.name + " to " + (caps()[u.sys] + u.curS + u.bought) + (u.mult > 1 ? " (x" + u.mult + ")" : ""); });
+    var stars = Math.floor(p.have / s.divisor) + s.fixed, tot = total(p.used);
+    var head = timeMode ? "Best in the " + val("p_days") + " days left with your purchases and bag: " : (p.reached ? "Reachable: " : "Not reachable at that character level (the gates cap it): ");
+    return head + (parts.join(", ") || "nothing to buy") + " &rarr; " + fmt(p.have) + " points (" + fmt(stars) + " " + D.names.star + ", grade " + grade(p.have) + ") for about " + fmt(tot) + " swings: " +
+      REALMS.filter(function (r) { return p.used[r[0]] > 0; }).map(function (r) { return fmt(Math.ceil(p.used[r[0]])) + " in " + r[1]; }).join(", ") + ". The targets above have been set to this.";
   }
-  function recommend() {
-    var p = plan();
-    p.units.forEach(function (u) { $(u.tgtId).value = u.cur + u.bought; });
-    compute(); showPlan();
+  function recommend(timeMode) {
+    var p = plan(timeMode);
+    p.units.forEach(function (u) { $(u.tgtId).value = caps()[u.sys] + u.curS + u.bought; });
+    compute();
+    $("out_goal").innerHTML = describe(p, timeMode);
     $("out_sum").scrollIntoView({ behavior: "smooth", block: "center" });
   }
   function init() {
-    fillTiers(); prefill();
-    $("p_season").addEventListener("change", function () { fillTiers(); prefill(); compute(); showPlan(); });
-    $("p_tier").addEventListener("change", function () { prefill(); compute(); showPlan(); });
+    fillTiers();
+    $("p_season").addEventListener("change", function () { fillTiers(); compute(); });
     document.querySelectorAll("#primo input, #primo select").forEach(function (el) {
-      if (el.id === "p_season" || el.id === "p_tier") return;
-      el.addEventListener("input", function () { compute(); showPlan(); }); el.addEventListener("change", function () { compute(); showPlan(); });
+      if (el.id === "p_season") return;
+      el.addEventListener("input", compute); el.addEventListener("change", compute);
     });
-    $("p_reco").addEventListener("click", recommend);
-    compute(); showPlan();
+    $("p_reco").addEventListener("click", function () { recommend(false); });
+    $("p_recotime").addEventListener("click", function () { recommend(true); });
+    compute();
   }
   init();
 })();
@@ -391,6 +399,17 @@ def render(layout, base_tables):
     for r in rows_of("treasure_levelup_material")[1]:
         c = _items(r[1]); normal["relic"][_num(r[0])] = {"sand": sum(v * SAND.get(i, 0) for i, v in c.items()), "rolla": c.get(1, 0)}
 
+    xp = {"player": {}, "pet": {}}
+    h, lx = rows_of("level_exp"); xi = {c: i for i, c in enumerate(h)}
+    for r in lx:
+        lv = _num(r[0], -1)
+        if lv < 0:
+            continue
+        if xi.get("1") is not None and r[xi["1"]].strip():
+            xp["player"][lv] = _num(r[xi["1"]])
+        if xi.get("2") is not None and r[xi["2"]].strip():
+            xp["pet"][lv] = _num(r[xi["2"]])
+
     # ---- tools, pact, gear pieces
     h, qb = rows_of("quick_buy"); qi = {c: i for i, c in enumerate(h)}
     q = next(r for r in qb if r[0].strip() == "100")
@@ -402,7 +421,7 @@ def render(layout, base_tables):
     poses = re.findall(r'"(\w+)"', rows_of("equip_upgrade_bless")[1][0][2])
     pieces = [(p, loc(f"EquipPos.{p}", p)) for p in poses]
 
-    data = {"seasons": seasons, "ladders": ladders, "playerScore": player_score, "normal": normal, "yields": yields, "tools": tool_cfg, "pact": pact_cum, "pieces": pieces,
+    data = {"seasons": seasons, "ladders": ladders, "playerScore": player_score, "normal": normal, "yields": yields, "tools": tool_cfg, "pact": pact_cum, "pieces": pieces, "xp": xp,
             "names": {"star": item_name(61), "ore": item_name(41300), "refined": item_name(41301), "rolla": item_name(1), "essence": item_name(42200),
                       "sand": item_name(41400), "dawnium": item_name(2), "toolOre": item_name(tools["RoughRefineStone"]), "toolRolla": item_name(tools["SilverCoin"]),
                       "toolEssence": item_name(tools["SkillSeniorMaterial"]), "toolSand": item_name(tools["SandsOfTime"])}}
@@ -434,7 +453,7 @@ def render(layout, base_tables):
     def num(id_, v, ph=""):
         return f'<input type="number" id="{id_}" value="{v}" min="0"{f" placeholder=\"{ph}\"" if ph else ""}>'
 
-    gear_rows = "".join(f'<tr><th>{esc(name)}</th><td>{num(f"lvl_equip_{key}", "")}</td><td>{num(f"cur_equip_{key}", 0)}</td><td>{num(f"tgt_equip_{key}", 20)}</td></tr>' for key, name in pieces)
+    gear_rows = "".join(f'<tr><th>{esc(name)}</th><td>{num(f"cur_equip_{key}", 130)}</td><td>{num(f"tgt_equip_{key}", 150)}</td></tr>' for key, name in pieces)
 
     body = f"""
 <div class="wrap">
@@ -443,7 +462,7 @@ def render(layout, base_tables):
 <p class="lede">Set the season, where you stand and where you want to be; the planner returns the Progression score,
 the grade, the {esc(item_name(61))}s at season end, and the Material Realm swings, tools, days and {esc(item_name(2))} it takes &mdash;
 gear piece by piece, skills, relics, Fantomon and character levels all counted with the game's own rates. Give it a goal and
-press <b>Recommend</b> to have it pick the cheapest levels for you.</p>
+press <b>Recommend</b> to have it pick the cheapest levels for you, or ask for the most it can reach in the days you have left.</p>
 
 <p class="calcnote">The rule card: <i>"For each Season Character Level gained, you receive {{1}} pts. For each Total Season Gear
 Enhancement Level gained, {{2}} pts. For each Total Season Skill Level gained, {{3}} pts. For each Total Season Fantomon Level
@@ -456,39 +475,51 @@ each ladder opens further as your own season level rises (the gate table below).
   <div class="conv">
     <label>Season <select id="p_season">{season_opts}</select></label>
     <label>Your promotion <select id="p_tier">{tier_opts}</select></label>
+    <label>Days left in the season <input type="number" id="p_days" value="30" min="0"></label>
+    <label><input type="checkbox" id="p_norefined" checked> ignore {esc(item_name(41301))} costs (untick if you have to mine it)</label>
+    <div class="out" id="p_caps"></div>
+  </div>
+
+  <h3>Where you are and where you want to be</h3>
+  <p class="calcnote">Enter the levels as the game shows them. The planner knows the caps, so it works out which part is a
+  season level by itself; targets below the cap cost materials but score nothing.</p>
+  <div class="pgrid">
+    <div class="pfield"><b>Character</b> <span class=hint>cap <span id="cap_player"></span></span>
+      {lab("Level now", num("cur_player", 131))}{lab("Target level", num("tgt_player", 140))}</div>
+    <div class="pfield"><b>Skills</b> <span class=hint>cap <span id="cap_skill"></span>, all slots alike</span>
+      {lab("Level now", num("cur_skill", 130))}{lab("Target level", num("tgt_skill", 160))}{lab("Slots", num("n_skill", 8))}</div>
+    <div class="pfield"><b>Relics</b> <span class=hint>cap <span id="cap_relic"></span>, all relics alike</span>
+      {lab("Level now", num("cur_relic", 13))}{lab("Target level", num("tgt_relic", 16))}{lab("Relics", num("n_relic", 4))}</div>
+    <div class="pfield"><b>Fantomon</b> <span class=hint>cap <span id="cap_pet"></span></span>
+      {lab("Level now", num("cur_pet", 130))}{lab("Target level", num("tgt_pet", 160))}{lab("Fantomon levelled", num("n_pet", 1))}</div>
+  </div>
+  <div class="pfield" style="margin:0 0 14px"><b>Gear</b> <span class=hint>cap <span id="cap_equip"></span>, each piece on its own</span>
+    <div class="tablewrap" style="margin:6px 0 0"><table class="xp small"><thead><tr><th>Piece</th><th>Level now</th><th>Target level</th></tr></thead><tbody>{gear_rows}</tbody></table></div></div>
+
+  <h3>Your daily tool purchases</h3>
+  <div class="conv">
     <label>{esc(item_name(tools["RoughRefineStone"]))} buys/day <input type="number" id="buy_ironvein" value="4" min="0" max="{tool_cfg['max']}"></label>
     <label>{esc(item_name(tools["SilverCoin"]))} buys/day <input type="number" id="buy_gilded" value="2" min="0" max="{tool_cfg['max']}"></label>
     <label>{esc(item_name(tools["SkillSeniorMaterial"]))} buys/day <input type="number" id="buy_dread" value="2" min="0" max="{tool_cfg['max']}"></label>
     <label>{esc(item_name(tools["SandsOfTime"]))} buys/day <input type="number" id="buy_dustfall" value="4" min="0" max="{tool_cfg['max']}"></label>
-    <label><input type="checkbox" id="p_norefined" checked> ignore {esc(item_name(41301))} costs (untick if you have to mine it)</label>
-    <div class="out" id="p_caps"></div>
-    <div class="out hint" id="p_prefill"></div>
+    <label>{esc(item_name(tools["RoughRefineStone"]))} in bag <input type="number" id="bag_ironvein" value="0" min="0"></label>
+    <label>{esc(item_name(tools["SilverCoin"]))} in bag <input type="number" id="bag_gilded" value="0" min="0"></label>
+    <label>{esc(item_name(tools["SkillSeniorMaterial"]))} in bag <input type="number" id="bag_dread" value="0" min="0"></label>
+    <label>{esc(item_name(tools["SandsOfTime"]))} in bag <input type="number" id="bag_dustfall" value="0" min="0"></label>
   </div>
 
-  <h3>Goal</h3>
+  <h3>Recommend</h3>
   <div class="conv"><label>I want <input type="number" id="p_goal" value="200" min="0"></label><label>&nbsp;<select id="p_goalkind"><option value="stars">{esc(item_name(61))}</option><option value="score">points</option></select></label>
-  <label>&nbsp;<button type="button" id="p_reco" class="pickbtn">Recommend for me</button></label>
+  <label>&nbsp;<button type="button" id="p_reco" class="pickbtn">Recommend for this goal</button></label>
+  <label>&nbsp;<button type="button" id="p_recotime" class="pickbtn">Best I can do in the days left</button></label>
   <div class="out" id="out_goal"></div></div>
-  <p class="calcnote">Recommend starts from your current season levels and buys gear, skill and relic levels in order of points per
-  swing until the goal is met, within the gates of your target character season level, then writes those targets into the fields
-  below. Fantomon and character levels come from your own fields, since they are XP, not realm materials.</p>
-
-  <h3>Where you are and where you want to be</h3>
-  <div class="pgrid">
-    <div class="pfield"><b>Character</b> <span class=hint>cap <span id="cap_player"></span></span>
-      {lab("Season level now", num("cur_player", 0))}{lab("Target season level", num("tgt_player", 10))}</div>
-    <div class="pfield"><b>Skills</b> <span class=hint>cap <span id="cap_skill"></span>, per slot</span>
-      {lab("Current normal level", num("lvl_skill", ""))}{lab("Season levels now", num("cur_skill", 0))}{lab("Target season level", num("tgt_skill", 30))}{lab("Slots", num("n_skill", 8))}</div>
-    <div class="pfield"><b>Relics</b> <span class=hint>cap <span id="cap_relic"></span>, per relic</span>
-      {lab("Current normal level", num("lvl_relic", ""))}{lab("Season levels now", num("cur_relic", 0))}{lab("Target season level", num("tgt_relic", 3))}{lab("Relics", num("n_relic", 4))}</div>
-    <div class="pfield"><b>Fantomon</b> <span class=hint>cap <span id="cap_pet"></span>, per Fantomon</span>
-      {lab("Current normal level", num("lvl_pet", ""))}{lab("Season levels now", num("cur_pet", 0))}{lab("Target season level", num("tgt_pet", 30))}{lab("Fantomon levelled", num("n_pet", 1))}</div>
-  </div>
-  <div class="pfield" style="margin:0 0 14px"><b>Gear</b> <span class=hint>cap <span id="cap_equip"></span>, each piece on its own ladder</span>
-    <div class="tablewrap" style="margin:6px 0 0"><table class="xp small"><thead><tr><th>Piece</th><th>Current normal level</th><th>Season levels now</th><th>Target season level</th></tr></thead><tbody>{gear_rows}</tbody></table></div></div>
+  <p class="calcnote">Both buttons start from your current levels and buy gear, skill and relic levels in order of points per swing,
+  within the gates of your target character level, then write the targets into the fields above. The second one also stays inside
+  the tools you can have: what is in your bag plus days left &times; buys &times; {tool_cfg['pack']} per realm. Fantomon and character levels
+  come from your own fields, since they are XP, not realm materials.</p>
 
   <p class="verdict" id="out_sum"></p>
-  <div class="tablewrap"><table class="xp small"><thead><tr><th>Category</th><th class=num>Season levels</th><th class=num>Points</th><th>Materials</th><th class=num>Swings</th></tr></thead><tbody id="out_rows"></tbody></table></div>
+  <div class="tablewrap"><table class="xp small"><thead><tr><th>Category</th><th class=num>Level</th><th class=num>Season levels gained</th><th class=num>Points</th><th>Materials</th><th class=num>Swings</th></tr></thead><tbody id="out_rows"></tbody></table></div>
   <ul class="calcnote" id="out_notes"></ul>
   <h3>Tools and days</h3>
   <div class="tablewrap"><table class="xp small"><thead><tr><th>Realm</th><th class=num>Tools needed</th><th class=num>Buys &times; pack a day</th><th class=num>Days</th><th class=num>{esc(item_name(2))} a day</th><th class=num>{esc(item_name(2))} in all</th></tr></thead><tbody id="out_tools"></tbody></table></div>
@@ -496,7 +527,7 @@ each ladder opens further as your own season level rises (the gate table below).
   <p class="calcnote">Shop: {tool_cfg['pack']} tools per purchase; purchases per day cost {tool_txt} {esc(tool_cfg['currency'])}, {tool_cfg['max']} purchases a day at most
   (<code>quick_buy</code>). Swings are averages over the swing roll and the node odds; Refined Ore comes flat from the Refined Ore Mine and is the slow part of gear.</p>
   <h3>Best next levels</h3>
-  <p>Points per swing of the next levels open to you, best first. Greyed rows wait for a higher character season level.</p>
+  <p>Points per swing of the next levels open to you, best first. Greyed rows wait for a higher character level.</p>
   <div class="tablewrap"><table class="xp small"><thead><tr><th>Level</th><th class=num>Points</th><th class=num>Swings</th><th class=num>Points per swing</th><th>Gate</th></tr></thead><tbody id="out_best"></tbody></table></div>
 </section>
 
