@@ -233,9 +233,34 @@ JS = r"""
     $("out_goal").innerHTML = describe(p, timeMode);
     $("out_sum").scrollIntoView({ behavior: "smooth", block: "center" });
   }
+  function panel() {
+    var s = season(), keys = ["player", "equip", "skill", "pet", "relic"], names = { player: "Season Character Level", equip: "Season Gear Level", skill: "Season Skill Level", pet: "Season Fantomon Level", relic: "Season Relic Level" };
+    var rows = "", tot = 0, sc = D.playerScore[fam()] || [];
+    keys.forEach(function (k) {
+      var v = val("pan_" + k), p = k === "player" ? (sc[v - 1] || v * s.rates.player) : v * s.rates[k]; tot += p;
+      rows += "<tr><th>" + names[k] + "</th><td class=num>" + v + "</td><td class=num>" + s.rates[k] + "</td><td class=num>" + fmt(p) + "</td></tr>";
+    });
+    var stars = Math.floor(tot / s.divisor) + s.fixed;
+    $("pan_rows").innerHTML = rows;
+    $("pan_sum").innerHTML = "<b>" + fmt(tot) + " points</b> &rarr; grade <b>" + grade(tot) + "</b> &rarr; <b>" + fmt(stars) + " " + D.names.star + "</b> (" + fmt(tot) + " / " + s.divisor + " + " + s.fixed + "). The game adds a few points for XP part-way to the next character level, so its score can run slightly above this.";
+  }
+  function seedFromPanel() {
+    var c = caps(), g = val("pan_equip"), n = PIECES.length;
+    PIECES.forEach(function (p, i) { $("cur_equip_" + p[0]).value = c.equip + Math.floor(g / n) + (i < g % n ? 1 : 0); });
+    var ns = Math.max(1, val("n_skill")), nr = Math.max(1, val("n_relic")), np = Math.max(1, val("n_pet"));
+    $("cur_skill").value = c.skill + Math.round(val("pan_skill") / ns);
+    $("cur_relic").value = c.relic + Math.round(val("pan_relic") / nr);
+    $("cur_pet").value = c.pet + Math.round(val("pan_pet") / np);
+    $("cur_player").value = c.player + val("pan_player");
+    compute();
+    $("out_sum").scrollIntoView({ behavior: "smooth", block: "center" });
+  }
   function init() {
     fillTiers();
-    $("p_season").addEventListener("change", function () { fillTiers(); compute(); });
+    ["pan_player", "pan_equip", "pan_skill", "pan_pet", "pan_relic"].forEach(function (id) { $(id).addEventListener("input", panel); });
+    $("p_seed").addEventListener("click", seedFromPanel);
+    panel();
+    $("p_season").addEventListener("change", function () { fillTiers(); panel(); compute(); });
     document.querySelectorAll("#primo input, #primo select").forEach(function (el) {
       if (el.id === "p_season") return;
       el.addEventListener("input", compute); el.addEventListener("change", compute);
@@ -480,16 +505,30 @@ each ladder opens further as your own season level rises (the gate table below).
     <div class="out" id="p_caps"></div>
   </div>
 
+  <h3>Your Progression panel</h3>
+  <p class="calcnote">Copy the five numbers from the season's Progression tab: they are totals of season levels per category
+  (gear over all five pieces, skills over all eight slots, relics over every relic you level, Fantomon over every Fantomon).</p>
+  <div class="conv">
+    <label>Season Character Level <input type="number" id="pan_player" value="0" min="0"></label>
+    <label>Season Gear Level <input type="number" id="pan_equip" value="0" min="0"></label>
+    <label>Season Skill Level <input type="number" id="pan_skill" value="0" min="0"></label>
+    <label>Season Fantomon Level <input type="number" id="pan_pet" value="0" min="0"></label>
+    <label>Season Relic Level <input type="number" id="pan_relic" value="0" min="0"></label>
+    <label>&nbsp;<button type="button" id="p_seed" class="pickbtn">Use these as my current levels</button></label>
+    <div class="out"><div class="tablewrap" style="margin:0 0 8px"><table class="xp small"><thead><tr><th>Category</th><th class=num>Season levels</th><th class=num>Points each</th><th class=num>Points</th></tr></thead><tbody id="pan_rows"></tbody></table></div><div id="pan_sum"></div></div>
+  </div>
+
   <h3>Where you are and where you want to be</h3>
-  <p class="calcnote">Enter the levels as the game shows them. The planner knows the caps, so it works out which part is a
-  season level by itself; targets below the cap cost materials but score nothing.</p>
+  <p class="calcnote">Enter the levels as the game shows them on each item (a gear piece at 142, a skill at 129). The planner
+  knows the caps, so it works out which part is a season level by itself; targets below the cap cost materials but score nothing.
+  The counts say over how many pieces, slots, relics and Fantomon the season levels are spread.</p>
   <div class="pgrid">
     <div class="pfield"><b>Character</b> <span class=hint>cap <span id="cap_player"></span></span>
       {lab("Level now", num("cur_player", 131))}{lab("Target level", num("tgt_player", 140))}</div>
     <div class="pfield"><b>Skills</b> <span class=hint>cap <span id="cap_skill"></span>, all slots alike</span>
       {lab("Level now", num("cur_skill", 130))}{lab("Target level", num("tgt_skill", 160))}{lab("Slots", num("n_skill", 8))}</div>
-    <div class="pfield"><b>Relics</b> <span class=hint>cap <span id="cap_relic"></span>, all relics alike</span>
-      {lab("Level now", num("cur_relic", 13))}{lab("Target level", num("tgt_relic", 16))}{lab("Relics", num("n_relic", 4))}</div>
+    <div class="pfield"><b>Relics</b> <span class=hint>cap <span id="cap_relic"></span>, all levelled relics alike</span>
+      {lab("Level now", num("cur_relic", 13))}{lab("Target level", num("tgt_relic", 16))}{lab("Relics levelled (up to 20: 5 elements &times; 4 slots)", num("n_relic", 4))}</div>
     <div class="pfield"><b>Fantomon</b> <span class=hint>cap <span id="cap_pet"></span></span>
       {lab("Level now", num("cur_pet", 130))}{lab("Target level", num("tgt_pet", 160))}{lab("Fantomon levelled", num("n_pet", 1))}</div>
   </div>
