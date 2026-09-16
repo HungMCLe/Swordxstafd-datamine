@@ -482,7 +482,8 @@ def render(layout, base_tables):
 <p class="eyebrow">Progression</p>
 <h1>Material Realms and relics</h1>
 <p class="lede">One tool per swing, a reward per point of durability, and every reward multiplied by your promotion's
-factor. Pick a material below for its table by promotion; the Relics tab prices every level in the sand you actually mine.</p>
+factor. Pick a material below for its table by promotion; the Relics tab prices every level in the sand you actually mine.
+For what those swings are worth in season points, use the <a href="primostars.html">Primostar planner</a>.</p>
 {facts}
 <p class="calcnote">The rule card in the game: <i>"{esc(tips[0])}"</i> <i>"{esc(tips[1])}"</i> Reward counts are
 <code>reward_rule</code> base &times; <code>level_number</code> column 6 at your sub-rank, rounded down; the realm
