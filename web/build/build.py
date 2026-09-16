@@ -55,6 +55,7 @@ NAV = [
     ("Arena",           "arena.html",              "arena"),
     ("XP",              "xp.html",                 "xp"),
     ("Realms",          "realms.html",             "realms"),
+    ("Primostars",      "primostars.html",         "primostars"),
     ("Cookbook",        "cookbook.html",           "cookbook"),
     ("Top-up ladder",   "top-up-ladder.html",      "topup"),
     ("Method",          "method.html",             "method"),
@@ -209,6 +210,10 @@ inferred from testing, or translated by hand.</p>
     <h3>Top-up ladder</h3>
     <p>All 75 cumulative spending tiers, $5 to $150,000, with every reward and its real icon.</p>
     <span class="tag">Economy</span></a>
+  <a class="card gold" href="primostars.html"><span class="rail"></span>
+    <h3>Primostar planner</h3>
+    <p>Season score, grade and Primostars for any season, and the realm swings, tools and days each target costs.</p>
+    <span class="tag">Interactive</span></a>
   <a class="card" href="realms.html"><span class="rail"></span>
     <h3>Material Realms and relics</h3>
     <p>What a swing pays at every promotion, the fight that opens each realm level, and every relic level&rsquo;s

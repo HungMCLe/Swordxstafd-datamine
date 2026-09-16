@@ -17,6 +17,7 @@ import pet_page
 import arena_page
 import xp_page
 import realms_page
+import primostar_page
 import cook_page
 import petability_page
 import petspend_page
@@ -346,6 +347,7 @@ def main():
     n += write("arena.html", arena_page.render(layout))
     n += write("xp.html", xp_page.render(layout, base_tables))
     n += write("realms.html", realms_page.render(layout, base_tables))
+    n += write("primostars.html", primostar_page.render(layout, base_tables))
     n += write("cookbook.html", cook_page.render(layout, base_tables, DIST, OUT))
     n += write("pet-trees.html", petability_page.render(layout, base_tables, DIST, OUT, charts))
     n += write("combat/index.html", page_combat_index())

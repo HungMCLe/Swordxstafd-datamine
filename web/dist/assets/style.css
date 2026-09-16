@@ -956,4 +956,15 @@ table.xp.small th,table.xp.small td{padding:5px 9px;font-size:12.5px}
 .conv label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--muted)}
 .conv input,.conv select{font:600 14px/1 var(--mono);padding:8px 10px;border-radius:7px;border:1px solid var(--line);background:var(--ground);color:var(--ink)}
 .conv input{width:7em}
+.conv label{min-width:0;max-width:100%}
+.conv select,.conv input{max-width:100%;box-sizing:border-box}
 .conv .out{flex-basis:100%;font-size:14px;line-height:1.5}
+
+/* primostar planner */
+.pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:14px 0}
+.pfield{padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;gap:6px}
+.pfield b{font-size:13.5px}
+.pfield label{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.pfield input{width:6em;font:600 13px/1 var(--mono);padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--ground);color:var(--ink)}
+.conv label input[type=checkbox]{width:auto}
+ul.calcnote{padding-left:18px}
