@@ -184,11 +184,13 @@ def render(layout, dist, out):
 straight from the evolution table. Names, roles, stages and skill text are the game's own.</p>
 <p>Their ability trees, page by page with materials and stats, are on the <a href="pet-trees.html">Fantomon ability trees</a> page.</p>
 <p>Every skill card below carries a quality stepper: a pet skill starts at its item's quality and each rank-up jumps to the
-next quality (<code>PetUtils.GetNextSkillRank</code>), up to Immortal. The numbers are the game's own scaling chain at that rank,
-on the level curve your character rank picks, at the pet level you set.</p>
+next quality (<code>PetUtils.GetNextSkillRank</code>), up to Immortal. A percentage moves with the quality alone; a flat
+figure (the "+ 1,522" part) also grows with the <b>pet's level</b>, on the curve your character rank picks &mdash; set both here
+and every card follows.</p>
 <div class="controls">
   <label><span class="ctl-label">Pet level</span><input type="number" id="petlvl" value="{sdata.get("defaultLevel", 100)}" min="1" max="{(sdata.get("levels") or [200])[-1]}"></label>
   <label><span class="ctl-label">Character rank</span><select id="petsubrank">{subopts}</select></label>
+  <p class="ctl-note">Flat parts are shown "at Lv N" on each card so you can see which numbers the level moves.</p>
 </div>
 <div class="qallrow">{qalls}</div>
 {ph_txt}
