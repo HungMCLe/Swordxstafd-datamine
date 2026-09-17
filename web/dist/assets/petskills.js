@@ -41,8 +41,9 @@
         var v = valueOf(p, rank);
         if (v === undefined) return;
         if (p === "CD" && v < 0) return;                 /* a passive's -1 CD is "no cooldown" */
-        var txt = fmt(v, d.pct[p]), mate = d.pair[p];
-        if (mate) { var f = valueOf(mate, rank); if (f !== undefined && f) txt += " + " + fmt(f, d.pct[mate]); }
+        var txt = fmt(v, d.pct[p]), mate = d.pair[p], onCurve = d.lmult[rank] && d.lmult[rank][p] !== undefined;
+        if (mate) { var f = valueOf(mate, rank); if (f !== undefined && f) { txt += " + " + fmt(f, d.pct[mate]); onCurve = true; } }
+        if (onCurve) txt += ' <span class="hint">at Lv ' + level + "</span>";     /* the flat part sits on the pet-level curve */
         h += '<div class="row"><dt>' + d.labels[p] + "</dt><dd>" + txt + "</dd></div>";
       });
       dl.innerHTML = h; dl.className = "sk-stats " + (QCLASS[q] || "");
