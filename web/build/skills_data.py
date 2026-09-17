@@ -567,6 +567,46 @@ def main():
             "skills": sk,
         })
 
+    # ---- pet skills: the same scaling chain, stepped by quality. PetUtils.GetSkillRank starts a pet skill at
+    # SkillRankInfoParser.GetOrigRank = the first rank of the item's Quality, and GetNextSkillRank jumps to the first
+    # rank of the next quality, up to skill.MaxRankLimit; skill_rank.CostPetPiece is the shards each step costs.
+    item_quality = {}
+    for r in table("item"):
+        try:
+            item_quality[int(r["ClassId"])] = QUALITY_EN.get((r.get("Quality") or "").strip(), "")
+        except Exception:
+            pass
+    step_cost = {}
+    for r in table("skill_rank"):
+        try:
+            step_cost[int(r["Rank"])] = int(r.get("CostPetPiece") or 0)
+        except Exception:
+            pass
+    pet_ids = []
+    for e in table("pet_evolution"):
+        for col in ("EntitySkill", "EntityActiveSkills", "SupportSkills", "ActiveSkills", "PassiveSkills"):
+            for i in ints(e.get(col)):
+                if i not in pet_ids:
+                    pet_ids.append(i)
+    pet_skills = {}
+    for cid in pet_ids:
+        en = skill_entry(cid)
+        if not en:
+            continue
+        srow = skills.get(cid) or {}
+        try:
+            maxr = int(srow.get("MaxRankLimit") or 0) or 34
+        except Exception:
+            maxr = 34
+        orig = quality_first_rank.get(item_quality.get(cid) or "Rare", 1)
+        steps = [quality_first_rank[q] for q in QORDER if q in quality_first_rank and orig <= quality_first_rank[q] <= maxr]
+        have = set(en.get("ranks") or [])
+        en["petRanks"] = [rk for rk in steps if rk in have]
+        en["origRank"] = orig
+        en["maxRank"] = maxr
+        en["stepCost"] = {str(rk): step_cost.get(rk, 0) for rk in steps}
+        pet_skills[str(cid)] = en
+
     # summoned creatures' fixed props (summon_monster_fix_prop) grow on the same level curves as skills
     for _r in table("summon_monster_fix_prop"):
         try:
@@ -604,6 +644,7 @@ def main():
         "curves": curves,
         "stats": [{"key": k, "label": lb, "pct": k in PCT} for k, lb in STATS],
         "tiers": [{"tier": t, "classes": tiers[t]} for t in sorted(tiers)],
+        "petSkills": pet_skills,
     }
     def charm_props(sk):
         """Per-rank stat contributions of a Charm, in the shape the sim applies."""

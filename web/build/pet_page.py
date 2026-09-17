@@ -1,7 +1,7 @@
 """Pets — every pet with its skills as a baby and as an adult, from pet / pet_evolution,
 with the shared growth curve, potential and skill-rank tables."""
 from __future__ import annotations
-import html, re, os, shutil, collections
+import html, re, os, shutil, collections, json
 
 
 def _num(s, d=0):
@@ -43,6 +43,12 @@ def render(layout, dist, out):
     h, pot = rows_of("pet_potential"); poi = {c: i for i, c in enumerate(h)}
     h, prank = rows_of("pet_skill_rank"); pri = {c: i for i, c in enumerate(h)}
     h, pb = rows_of("pet_battle"); pbi = {c: i for i, c in enumerate(h)}
+    # per-quality values of every pet skill, from the same scaling chain as the Skills page (skills_data.py)
+    try:
+        sdata = json.loads((out / "_skills.json").read_text(encoding="utf-8")) if hasattr(out, "read_text") else json.load(open(os.path.join(out, "_skills.json"), encoding="utf-8"))
+    except Exception:
+        sdata = {}
+    petsk = sdata.get("petSkills", {})
     battle = {r[0].strip(): r for r in pb}
     h, lpp = rows_of("level_prop_pet"); lpi = {c: i for i, c in enumerate(h)}
     curve = collections.defaultdict(dict)
@@ -77,9 +83,22 @@ def render(layout, dist, out):
             bits.append(f"reaches {html.escape(QW.get(quality, quality))} on evolution")
         if promotable:
             bits.append("ranks up with shards")
-        return (f'<div class="petskill">{icon}<div><b>{html.escape(name)}</b>'
+        e = petsk.get(str(sid))
+        attr, stepper, stats = "", "", ""
+        if e and e.get("petRanks"):
+            payload = html.escape(json.dumps({"ranks": e["petRanks"], "vals": e["vals"], "lmult": e["lmult"], "lgroup": e["lgroup"],
+                                              "labels": e["labels"], "pct": e["pct"], "order": e["order"], "pair": e["pair"], "lkey": e["lkey"],
+                                              "stepCost": e.get("stepCost", {}), "origRank": e.get("origRank")}, ensure_ascii=False), quote=True)
+            attr = f' data-skill="{payload}"'
+            stepper = ('<div class="qstep"><button type="button" class="qbtn" data-dir="-1" aria-label="Lower quality">&lsaquo;</button>'
+                       '<span class="qname"></span><button type="button" class="qbtn" data-dir="1" aria-label="Higher quality">&rsaquo;</button>'
+                       '<span class="qcost hint"></span></div>')
+            stats = '<dl class="sk-stats"></dl>'
+        elif e:
+            stats = "<p class=\"sk-flat\">No scaled value in the game&rsquo;s chain for this one; its effect is in the words.</p>"
+        return (f'<div class="petskill"{attr}>{icon}<div><b>{html.escape(name)}</b>'
                 f'{" <span class=hint>" + " &middot; ".join(bits) + "</span>" if bits else ""}'
-                f'<p>{desc or "<i>no card text in the localisation</i>"}</p></div></div>')
+                f'<p>{desc or "<i>no card text in the localisation</i>"}</p>{stepper}{stats}</div></div>')
 
     def phase_block(e, title):
         promo = set(_ids(e[ei["PromotableSkills"]]))
@@ -147,6 +166,11 @@ def render(layout, dist, out):
     rank_rows = "".join(f"<tr><td>{html.escape(QW.get(r[pri['Quality']].strip(), r[pri['Quality']].strip()))}</td><td class='num'>{_num(r[pri['Piece']]):,}</td></tr>"
                         for r in prank if r[pri["Quality"]].strip() not in ("None",))
 
+    subopts = "".join(f'<option value="{html.escape(sr["id"])}"{" selected" if sr["id"] == sdata.get("defaultSubrank") else ""}>{html.escape(sr["name"])} &middot; to level {sr["cap"]}</option>'
+                      for sr in sdata.get("subranks", []))
+    qalls = "".join(f'<button type="button" class="qall q-{q.lower()}" data-q="{q}" aria-pressed="false">{q}</button>' for q in sdata.get("qualities", []))
+    globaljson = json.dumps(dict({k: sdata.get(k) for k in ("rankLabels", "rankQuality", "qualityRanks", "lpidOf", "defaultLevel", "defaultSubrank")}, v=_b.asset_v()),
+                            ensure_ascii=False).replace("</", "<\/")
     ph_txt = ""
     if placeholders:
         ph_txt = ("<p class='hint'>Two more pet ids exist in the table with placeholder names rather than localised ones (" +
@@ -159,6 +183,14 @@ def render(layout, dist, out):
 <p class="lede">Every pet in the game's table, with the skills it has as a baby and the ones it gains as an adult,
 straight from the evolution table. Names, roles, stages and skill text are the game's own.</p>
 <p>Their ability trees, page by page with materials and stats, are on the <a href="pet-trees.html">Fantomon ability trees</a> page.</p>
+<p>Every skill card below carries a quality stepper: a pet skill starts at its item's quality and each rank-up jumps to the
+next quality (<code>PetUtils.GetNextSkillRank</code>), up to Immortal. The numbers are the game's own scaling chain at that rank,
+on the level curve your character rank picks, at the pet level you set.</p>
+<div class="controls">
+  <label><span class="ctl-label">Pet level</span><input type="number" id="petlvl" value="{sdata.get("defaultLevel", 100)}" min="1" max="{(sdata.get("levels") or [200])[-1]}"></label>
+  <label><span class="ctl-label">Character rank</span><select id="petsubrank">{subopts}</select></label>
+</div>
+<div class="qallrow">{qalls}</div>
 {ph_txt}
 <div class="petgrid">{"".join(cards)}</div>
 
@@ -174,6 +206,8 @@ pets with a <code>pet_battle</code> row scale that curve by the percentages on t
 <caption><code>pet_skill_rank</code>: what each skill quality costs.</caption></div>
 </div>
 </div>
+<script type="application/json" id="petdata">{globaljson}</script>
+<script src="assets/petskills.js?v={_b.asset_v()}" defer></script>
 """
     return layout("Pets", "Every Sword x Staff pet with its baby and adult skills, the shared growth curve, potential and "
                   "skill-rank costs.", body, "pets", 0)
