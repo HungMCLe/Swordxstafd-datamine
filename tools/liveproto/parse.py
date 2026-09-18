@@ -1,6 +1,7 @@
 """Pull Sword x Staff game traffic out of a pktmon pcapng and reassemble it into two byte streams.
 
   python tools/liveproto/parse.py game.pcapng streams.json
+  python tools/liveproto/parse.py --ports 8030-8039,9030-9039 game.pcapng streams.json   (find/record another server's port; the flow list names it)
 
 The game talks KCP over UDP (TCP fallback) to the planes server on port 8033 (9033 on the backup
 host). pktmon writes raw IPv4 frames and logs each packet once per NDIS component, so packets are
@@ -81,9 +82,24 @@ def kcp_segments(data):
         i += 24 + ln
     return out if i == len(data) else None
 
+def port_set(spec):
+    """"8033,9033" or "8030-8039,9030-9039" -> set of ports."""
+    out = set()
+    for part in spec.split(','):
+        part = part.strip()
+        if '-' in part:
+            a, b = part.split('-', 1); out.update(range(int(a), int(b) + 1))
+        elif part:
+            out.add(int(part))
+    return out
+
 def main():
-    path = sys.argv[1]
-    outp = sys.argv[2] if len(sys.argv) > 2 else 'streams.json'
+    global GAME_PORTS
+    args = sys.argv[1:]
+    if '--ports' in args:                      # another server's planes host uses another port
+        i = args.index('--ports'); GAME_PORTS = port_set(args[i + 1]); del args[i:i + 2]
+    path = args[0]
+    outp = args[1] if len(args) > 1 else 'streams.json'
     seen, pkts, total = set(), [], 0
     for ts, f in frames(path):
         total += 1
