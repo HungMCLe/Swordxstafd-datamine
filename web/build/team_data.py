@@ -51,8 +51,8 @@ def sheet_of(bp: dict) -> dict:
     return s
 
 
-def build(out: Path, ranks: list, skills_by_id: dict) -> list:
-    src = out / "liveproto" / "fighters.json"
+def build(out: Path, ranks: list, skills_by_id: dict, source: str = "fighters.json") -> list:
+    src = out / "liveproto" / source
     if not src.exists():
         return []
     raw = json.loads(src.read_text(encoding="utf-8"))

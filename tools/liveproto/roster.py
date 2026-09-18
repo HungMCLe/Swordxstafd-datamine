@@ -4,6 +4,8 @@
   python tools/liveproto/roster.py show [name or id ...]
   python tools/liveproto/roster.py fighters Wei Nilee ... -o out/liveproto/fighters.json
   python tools/liveproto/roster.py fighters --top -o out/liveproto/fighters.json   (captured players of the latest top-100, in rank order)
+  python tools/liveproto/roster.py --roster jade-tide ingest out/liveproto/cap7/decoded.json   (a second server: its own store)
+  python tools/liveproto/roster.py --roster jade-tide fighters --top -o out/liveproto/fighters-jade-tide.json
 
 The roster lives in out/liveproto/roster.json (gitignored: it holds other players' data). Newer data
 replaces older per player; a short history of combat rating and the four main stats is kept.
@@ -16,11 +18,18 @@ if hasattr(sys.stdout, 'reconfigure'):
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 ROSTER = os.path.join(ROOT, 'out', 'liveproto', 'roster.json')
+# `--roster NAME` anywhere on the command line keeps a separate store, out/liveproto/roster-NAME.json,
+# so a second server's captures never mix with the first (each server has its own top-100).
+if '--roster' in sys.argv:
+    _i = sys.argv.index('--roster')
+    _name = sys.argv[_i + 1]
+    del sys.argv[_i:_i + 2]
+    ROSTER = _name if os.sep in _name or _name.endswith('.json') else os.path.join(ROOT, 'out', 'liveproto', f'roster-{_name}.json')
 
 def load():
     if os.path.exists(ROSTER):
         return json.load(open(ROSTER, encoding='utf-8'))
-    return dict(players={}, rankings={})
+    return dict(players={}, rankings={}, planes={})
 
 def save(r):
     os.makedirs(os.path.dirname(ROSTER), exist_ok=True)
@@ -39,9 +48,15 @@ def ingest(files):
             t, d = m['type'], m['data']
             if not isinstance(d, dict):
                 continue
-            if t == 'PlayerLiteInfoGetResponse':
+            if t == 'PlayerQueryPlanesNameResponse':
+                for pid_, names in (d.get('PlanesNames') or {}).items():
+                    if isinstance(names, dict) and names.get('en_US'):
+                        r.setdefault('planes', {})[str(pid_)] = names['en_US']
+            elif t == 'PlayerLiteInfoGetResponse':
                 for li in d.get('InfoList') or []:
                     p = player(r, li['Id'])
+                    if li.get('ServerId'):
+                        p['serverId'] = li['ServerId']
                     for k in ('Name', 'Profession', 'Level', 'SubRank', 'CombatRating', 'NoBlessCombatRating', 'Online', 'Sex', 'EngagePetClassId'):
                         if li.get(k) is not None:
                             p[k[0].lower() + k[1:]] = li[k]
@@ -49,6 +64,8 @@ def ingest(files):
             elif t == 'PlayerBriefInfo':
                 pid = d['TargetData']['TargetId']
                 p = player(r, pid)
+                if d['TargetData'].get('ServerId'):
+                    p['serverId'] = d['TargetData']['ServerId']
                 p['name'] = d.get('Name') or p.get('name')
                 p['sex'] = d.get('Sex', p.get('sex'))
                 snap = d['SnapshotData']
@@ -128,7 +145,7 @@ def fighter_record(p):
                 combatRating=p.get('combatRating'), battleProps=p.get('battleProps'), battlePropsTime=p.get('battlePropsTime'),
                 skills=skills_of(snap) if snap else None,
                 passives=[dict(id=w['RawData']['Id'], **(w['RawData'].get('ParamDict', {}).get('ItemParamSkill') or {})) for w in (snap.get('PassiveSkills') or [])] if snap else None,
-                engagePet=p.get('engagePetClassId'))
+                engagePet=p.get('engagePetClassId'), serverId=p.get('serverId'))
 
 def fighters(keys, outp, top=False):
     """Export fighters by name/id, or (top=True) every captured player of the latest top-100, in rank order."""

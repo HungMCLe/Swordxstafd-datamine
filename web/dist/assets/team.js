@@ -1622,6 +1622,29 @@
 
   /* ---------- state: leaderboard, teams, positions ---------- */
   var ROSTER = [];                 /* every fightable player, leaderboard order */
+  var SERVER = null;               /* the server whose roster is loaded (C.servers) */
+  function serverList() { return (C.servers && C.servers.length) ? C.servers : (C.fightersUrl ? [{ id: "default", name: "", url: C.fightersUrl }] : []); }
+  function pickServer() {
+    var list = serverList(), want = null;
+    try { want = localStorage.getItem("pw_team_server"); } catch (e) {}
+    return list.filter(function (s) { return s.id === want; })[0] || list[0] || null;
+  }
+  function stateKey() { return "pw_team" + (SERVER && SERVER.id !== "default" ? "." + SERVER.id : ""); }
+  function fetchRoster(sv) {
+    if (!sv) return Promise.resolve([]);
+    return fetch(sv.url + "?v=" + (C.v || "")).then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; })
+      .then(function (list) { return (list || []).filter(function (f) { return f && f.sheet && f.techs; }); });
+  }
+  function switchServer(id) {
+    var sv = serverList().filter(function (s) { return s.id === id; })[0];
+    if (!sv || (SERVER && sv.id === SERVER.id)) return;
+    fetchRoster(sv).then(function (list) {
+      SERVER = sv; ROSTER = list;
+      try { localStorage.setItem("pw_team_server", sv.id); } catch (e) {}
+      if (!loadState()) { TEAM = [[null, null, null, null], [null, null, null, null]]; defaultPositions(); }
+      PICK = null; invalidate();
+    });
+  }
   var TEAM = [[null, null, null, null], [null, null, null, null]];
   var POS = [];                    /* positions by team slot index 0..7 */
   var RESULT = null, PLAY = null, TIMERS = [];
@@ -1646,11 +1669,11 @@
     for (var i = 0; i < 8; i++) { var z = GRID.start[i < 4 ? 0 : 1][i % 4]; POS.push({ x: z[0], y: z[1] }); }
   }
   function saveState() {
-    try { localStorage.setItem("pw_team", JSON.stringify({ t: TEAM.map(function (t) { return t.map(function (f) { return f ? f.id : null; }); }), p: POS, o: OVER })); } catch (e) {}
+    try { localStorage.setItem(stateKey(), JSON.stringify({ t: TEAM.map(function (t) { return t.map(function (f) { return f ? f.id : null; }); }), p: POS, o: OVER })); } catch (e) {}
   }
   function loadState() {
     try {
-      var st = JSON.parse(localStorage.getItem("pw_team") || "null");
+      var st = JSON.parse(localStorage.getItem(stateKey()) || "null");
       if (!st || !st.t || !st.p || st.p.length !== 8) return false;
       OVER = st.o && typeof st.o === "object" ? st.o : {};
       TEAM = st.t.map(function (ids) { return ids.map(byId); });
@@ -2019,6 +2042,7 @@
       if (s && PICK && PICK.id !== undefined) { assign(+s.getAttribute("data-i"), PICK.id); }
     });
     $("lbfind").addEventListener("input", drawLb);
+    if ($("server")) { $("server").value = SERVER ? SERVER.id : ""; $("server").addEventListener("change", function () { switchServer(this.value); }); }
     $("fill").addEventListener("click", function () {
       var have = ROSTER.slice(0, 8).map(function (f) { return byId(f.id); });
       TEAM = [[null, null, null, null], [null, null, null, null]];
@@ -2236,7 +2260,7 @@
     $("tlrange").addEventListener("input", function () { if (!PLAY) return; stopPlayback(); seekTo(parseInt(this.value, 10)); });
     $("tltrack").addEventListener("click", function (ev) { var s = ev.target.closest ? ev.target.closest(".seg") : null; if (s && PLAY) { stopPlayback(); seekTo(+s.getAttribute("data-k"), true); } });
     $("combatlog").addEventListener("click", function (ev) { var li = ev.target.closest ? ev.target.closest("li[data-k]") : null; if (li && PLAY) { stopPlayback(); seekTo(+li.getAttribute("data-k"), true); } });
-    $("reset").addEventListener("click", function () { try { localStorage.removeItem("pw_team"); } catch (e) {} OVER = {}; TEAM = [[null, null, null, null], [null, null, null, null]]; defaultPositions(); PICK = null; invalidate(); });
+    $("reset").addEventListener("click", function () { try { localStorage.removeItem(stateKey()); } catch (e) {} OVER = {}; TEAM = [[null, null, null, null], [null, null, null, null]]; defaultPositions(); PICK = null; invalidate(); });
     skPickEvents();
     $("swap").addEventListener("click", function () {
       TEAM = [TEAM[1], TEAM[0]];
@@ -2253,11 +2277,11 @@
   Promise.all([
     fetch("../assets/duel.json?v=" + (C.v || "")).then(function (r) { return r.json(); }),
     fetch("../assets/curves.json?v=" + (C.v || "")).then(function (r) { return r.json(); }),
-    C.fightersUrl ? fetch(C.fightersUrl + "?v=" + (C.v || "")).then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; }) : Promise.resolve([])
+    fetchRoster(SERVER = pickServer())
   ]).then(function (v) {
     DATA = v[0]; CURVES = v[1];
     DATA.statuses = DATA.statuses || {}; DATA.trig = DATA.trig || {};
-    ROSTER = (v[2] || []).filter(function (f) { return f && f.sheet && f.techs; });
+    ROSTER = v[2] || [];
     boot();
   }).catch(function (e) { $("run").textContent = "Could not load skill data"; });
 })();
