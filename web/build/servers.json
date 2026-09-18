@@ -1,0 +1,14 @@
+[
+ {
+  "id": "lunar-radiance",
+  "name": "Lunar Radiance",
+  "source": "fighters.json",
+  "published": "fighters.json"
+ },
+ {
+  "id": "jade-tide",
+  "name": "Jade Tide",
+  "source": "fighters-jade-tide.json",
+  "published": "fighters-jade-tide.json"
+ }
+]

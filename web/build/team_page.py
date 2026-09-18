@@ -246,16 +246,21 @@ def render(layout, base_tables, dist: Path, out: Path):
     # the live leaderboard, if a roster export exists; served as a separate file that is never committed
     duel = json.loads((out / "_duel.json").read_text(encoding="utf-8"))
     by_id = {s["id"]: s for s in duel["skills"]}
-    fighters = team_data.build(out, ranks, by_id)
-    fighters_url = None
-    if fighters:
-        (dist / "assets" / "fighters.json").write_text(json.dumps(fighters, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-        fighters_url = "../assets/fighters.json"
+    # one roster per server (web/build/servers.json names them; the sources sit under the gitignored out/liveproto)
+    servers = []
+    for sv in json.loads((Path(__file__).parent / "servers.json").read_text(encoding="utf-8")):
+        fighters = team_data.build(out, ranks, by_id, sv["source"])
+        if not fighters:
+            continue
+        (dist / "assets" / sv["published"]).write_text(json.dumps(fighters, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        servers.append({"id": sv["id"], "name": sv["name"], "url": "../assets/" + sv["published"], "count": len(fighters)})
+    fighters_url = servers[0]["url"] if servers else None
+    server_opts = "".join(f'<option value="{html.escape(sv["id"])}">{html.escape(sv["name"])} &middot; {sv["count"]} captured</option>' for sv in servers)
 
     grid = grid_from_prefab()
     sk_data, _class_icon, class_tree = duel_page.class_data(out, dist)
     cfg = json.dumps({"ranks": ranks, "minCrit": 1.3, "minBlock": 1.5, "pvp": pvpgov, "speedScale": spd_scale,
-                      "v": _b.asset_v(), "grid": grid, "fightersUrl": fighters_url,
+                      "v": _b.asset_v(), "grid": grid, "fightersUrl": fighters_url, "servers": servers,
                       # the class line and the skill-rank labels, for the loadout picker on each team card
                       "classTree": class_tree, "rankLabels": sk_data["rankLabels"], "rankQuality": sk_data["rankQuality"],
                       # PropType -> sheet field, so a summoned creature's inherited sheet can be built from its caster's
@@ -323,6 +328,7 @@ and level, and try a setup the player does not run today.</p>
   </div>
   <section class="lbwrap">
     <div class="lbhead"><h3>Top 100 by combat rating</h3>
+      <select id="server" aria-label="Server">{server_opts}</select>
       <input type="search" id="lbfind" placeholder="Find a player&hellip;" autocomplete="off">
       <button type="button" id="fill" class="pickbtn">Fill 1&ndash;4 vs 5&ndash;8</button></div>
     <p class="hint">Drag a row onto a team (or tap a row, then a team slot).</p>
