@@ -331,7 +331,8 @@ and level, and try a setup the player does not run today.</p>
       <select id="server" aria-label="Server">{server_opts}</select>
       <input type="search" id="lbfind" placeholder="Find a player&hellip;" autocomplete="off">
       <button type="button" id="fill" class="pickbtn">Fill 1&ndash;4 vs 5&ndash;8</button></div>
-    <p class="hint">Drag a row onto a team (or tap a row, then a team slot).</p>
+    <p class="hint">Drag a row onto a team (or tap a row, then a team slot). This week&rsquo;s Tournament bracket, played on this
+      engine: <a href="tournament.html">Tournament projection</a>.</p>
     <div class="lb" id="lb"></div>
   </section>
 </div>
