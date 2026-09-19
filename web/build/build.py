@@ -186,6 +186,9 @@ inferred from testing, or translated by hand.</p>
   <a class="card gold" href="combat/team.html"><span class="rail"></span>
     <h3>Team battle simulator</h3>
     <p>Four against four on the battle grid, with real players&rsquo; sheets and equipped skills.</p></a>
+  <a class="card gold" href="combat/tournament.html"><span class="rail"></span>
+    <h3>Tournament projection</h3>
+    <p>This week&rsquo;s real Tournament bracket, every match played on the team engine from the preliminaries to the grand final.</p></a>
   <a class="card gold" href="combat/next-point.html"><span class="rail"></span>
     <h3>Where your next point goes</h3>
     <p>Put your sheet in and see which stat actually buys the most damage &mdash; and where
@@ -309,6 +312,10 @@ inside <code>Console.dll</code> that resolves every point of damage, healing and
     <h3>Team battle simulator</h3>
     <p>Four against four on the grid: positions, ranges, the same clock and formula, and the odds.</p>
     <span class="tag">Interactive</span></a>
+  <a class="card gold" href="tournament.html"><span class="rail"></span>
+    <h3>Tournament projection</h3>
+    <p>The real bracket as the client received it, played match by match on the team engine, with the odds of every simulated tie.</p>
+    <span class="tag">Projection</span></a>
   <a class="card gold" href="next-point.html"><span class="rail"></span>
     <h3>Where your next point goes</h3>
     <p>Put your own sheet in: which stat buys the most damage right now, and the exact Mastery
